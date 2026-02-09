@@ -153,6 +153,7 @@
 - Added runtime safety scaffold (torque limits, joint limits, fall detect, watchdog) (22.03).
 - Platform plumbing: XGen jobs now create `datasets` + `dataset_clips` records and upload real artifacts (`.npz` + `dataset.zip`) to MinIO/S3, and dataset clip URIs are returned as presigned URLs (24.01).
 - Platform plumbing: XMimic jobs now register a checkpoint artifact and create `policies` + `eval_runs` records on completion (24.02).
+- Platform ops: added `/ops/workers` to verify Celery CPU/GPU workers, added Mac `scripts/mac/run_full_e2e.sh`, added Windows `scripts/windows/one_click_gpu_worker.ps1`, fixed GPU smoke-script parsing, and corrected Table IV teacher schema (no `skill_label`) + relative-vector convention (24.03).
 
 ## Open items needed
 - Replace synthetic artifact generation with real XGen outputs (GVHMR/PhysHOI/Isaac Lab), including clip-aligned preview renders.
