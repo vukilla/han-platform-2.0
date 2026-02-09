@@ -409,69 +409,71 @@ def refine_contact_ik(
 
             refined[fi] = q_global
 
-    for tip, chain in chains.items():
-        targets = tip_targets[tip]
-        # Cache active indices once per tip.
-        try:
-            active_mask = np.asarray(chain.active_links_mask, dtype=bool)
-        except Exception:
-            active_mask = np.ones((len(chain.links),), dtype=bool)
-            if active_mask.size > 0:
-                active_mask[0] = False
-        active_idx = np.nonzero(active_mask)[0].astype(int)
+    if method != "sqp":
+        # Sequential single-tip IK refinement. For multi-tip refinement, use `method="sqp"` above.
+        for tip, chain in chains.items():
+            targets = tip_targets[tip]
+            # Cache active indices once per tip.
+            try:
+                active_mask = np.asarray(chain.active_links_mask, dtype=bool)
+            except Exception:
+                active_mask = np.ones((len(chain.links),), dtype=bool)
+                if active_mask.size > 0:
+                    active_mask[0] = False
+            active_idx = np.nonzero(active_mask)[0].astype(int)
 
-        for fi in contact:
-            if fi < 0 or fi >= t_steps:
-                continue
-            # Build initial position vector (len(chain.links)), including base at 0.
-            q_init = np.zeros((len(chain.links),), dtype=np.float32)
-            for li, link in enumerate(chain.links):
-                if li == 0:
+            for fi in contact:
+                if fi < 0 or fi >= t_steps:
                     continue
-                if link.name in jidx:
-                    q_init[li] = float(refined[fi, jidx[link.name]])
+                # Build initial position vector (len(chain.links)), including base at 0.
+                q_init = np.zeros((len(chain.links),), dtype=np.float32)
+                for li, link in enumerate(chain.links):
+                    if li == 0:
+                        continue
+                    if link.name in jidx:
+                        q_init[li] = float(refined[fi, jidx[link.name]])
 
-            if method == "ikpy":
-                sol = chain.inverse_kinematics(targets[fi], initial_position=q_init)
-            else:
-                # Damped-least-squares IK (Gauss-Newton) with numerical Jacobian, CPU-only.
-                q = q_init.astype(np.float32).copy()
-                tgt = np.asarray(targets[fi], dtype=np.float32).reshape(3)
-                for _ in range(max_iters):
-                    fk = chain.forward_kinematics(q)
-                    pos = np.asarray(fk[:3, 3], dtype=np.float32).reshape(3)
-                    err = tgt - pos
-                    if float(np.linalg.norm(err)) < tol:
-                        break
-                    if active_idx.size == 0:
-                        break
-                    # Numerical Jacobian J: (3, m) for active joints.
-                    J = np.zeros((3, int(active_idx.size)), dtype=np.float32)
-                    for ci, ji in enumerate(active_idx.tolist()):
-                        q2 = q.copy()
-                        q2[int(ji)] += float(jac_eps)
-                        fk2 = chain.forward_kinematics(q2)
-                        pos2 = np.asarray(fk2[:3, 3], dtype=np.float32).reshape(3)
-                        J[:, ci] = (pos2 - pos) / float(jac_eps)
-                    # dq = J^T (J J^T + lambda I)^-1 err
-                    JJt = J @ J.T
-                    JJt = JJt + float(damping) * np.eye(3, dtype=np.float32)
-                    dq = J.T @ np.linalg.solve(JJt, err)
-                    dq = np.clip(dq, -max_joint_delta, max_joint_delta).astype(np.float32)
-                    q[active_idx] = q[active_idx] + dq
-                sol = q
+                if method == "ikpy":
+                    sol = chain.inverse_kinematics(targets[fi], initial_position=q_init)
+                else:
+                    # Damped-least-squares IK (Gauss-Newton) with numerical Jacobian, CPU-only.
+                    q = q_init.astype(np.float32).copy()
+                    tgt = np.asarray(targets[fi], dtype=np.float32).reshape(3)
+                    for _ in range(max_iters):
+                        fk = chain.forward_kinematics(q)
+                        pos = np.asarray(fk[:3, 3], dtype=np.float32).reshape(3)
+                        err = tgt - pos
+                        if float(np.linalg.norm(err)) < tol:
+                            break
+                        if active_idx.size == 0:
+                            break
+                        # Numerical Jacobian J: (3, m) for active joints.
+                        J = np.zeros((3, int(active_idx.size)), dtype=np.float32)
+                        for ci, ji in enumerate(active_idx.tolist()):
+                            q2 = q.copy()
+                            q2[int(ji)] += float(jac_eps)
+                            fk2 = chain.forward_kinematics(q2)
+                            pos2 = np.asarray(fk2[:3, 3], dtype=np.float32).reshape(3)
+                            J[:, ci] = (pos2 - pos) / float(jac_eps)
+                        # dq = J^T (J J^T + lambda I)^-1 err
+                        JJt = J @ J.T
+                        JJt = JJt + float(damping) * np.eye(3, dtype=np.float32)
+                        dq = J.T @ np.linalg.solve(JJt, err)
+                        dq = np.clip(dq, -max_joint_delta, max_joint_delta).astype(np.float32)
+                        q[active_idx] = q[active_idx] + dq
+                    sol = q
 
-            # Write back solution for joints present in robot_qpos, with per-step delta clamp.
-            for li, link in enumerate(chain.links):
-                if li == 0:
-                    continue
-                if link.name not in jidx:
-                    continue
-                idx = jidx[link.name]
-                prev = float(refined[fi, idx])
-                new = float(sol[li])
-                delta = float(np.clip(new - prev, -max_joint_delta, max_joint_delta))
-                refined[fi, idx] = prev + delta
+                # Write back solution for joints present in robot_qpos, with per-step delta clamp.
+                for li, link in enumerate(chain.links):
+                    if li == 0:
+                        continue
+                    if link.name not in jidx:
+                        continue
+                    idx = jidx[link.name]
+                    prev = float(refined[fi, idx])
+                    new = float(sol[li])
+                    delta = float(np.clip(new - prev, -max_joint_delta, max_joint_delta))
+                    refined[fi, idx] = prev + delta
 
     if smooth_window > 0:
         # Simple moving average smoothing across the contact window for all joints.
