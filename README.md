@@ -10,6 +10,11 @@ HumanX Data Factory scaffolding: Next.js web app, FastAPI backend, XGen/XMimic s
    - Web: `http://localhost:3000`
    - API health: `http://localhost:8000/health`
 
+Fastest end-to-end (Mac control-plane + Windows GPU worker):
+1. On Mac: `./scripts/mac/run_full_e2e.sh`
+2. When it prints your Mac IP, run the printed Windows command:
+   - `powershell -ExecutionPolicy Bypass -File .\\scripts\\windows\\one_click_gpu_worker.ps1 -MacIp <MAC_IP> -IsaacSimPath C:\\isaacsim`
+
 What to test (golden path):
 - `docs/WHAT_TO_TEST.md`
 
