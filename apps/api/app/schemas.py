@@ -144,8 +144,11 @@ class XMimicJobOut(BaseModel):
     dataset_id: UUID
     mode: str
     status: str
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
     params_json: Optional[dict[str, Any]] = None
     logs_uri: Optional[str] = None
+    error: Optional[str] = None
     idempotency_key: Optional[str] = None
 
     class Config:

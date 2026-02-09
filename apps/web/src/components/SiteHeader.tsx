@@ -4,7 +4,9 @@ import { LinkButton } from "./ui/Button";
 const nav = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/demos/new", label: "New Demo" },
+  { href: "/datasets", label: "Datasets" },
   { href: "/training", label: "Training" },
+  { href: "/policies", label: "Policies" },
   { href: "/rewards", label: "Rewards" },
 ];
 

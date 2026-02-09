@@ -18,6 +18,27 @@ from app.worker import run_xgen_job, run_xmimic_job
 router = APIRouter()
 settings = get_settings()
 
+def _normalize_s3_key(uri: str) -> str:
+    """Return an object-storage key from either a raw key or an s3:// URI."""
+    if uri.startswith("s3://"):
+        rest = uri[len("s3://") :]
+        parts = rest.split("/", 1)
+        if len(parts) == 2:
+            return parts[1]
+    return uri
+
+
+def _presign_maybe(uri: str | None) -> str | None:
+    if not uri:
+        return None
+    if uri.startswith("http://") or uri.startswith("https://"):
+        return uri
+    key = _normalize_s3_key(uri)
+    # If it's some other scheme, don't attempt to presign it.
+    if "://" in key:
+        return uri
+    return create_presigned_get(key)
+
 
 class AuthLoginRequest(BaseModel):
     email: str
@@ -181,7 +202,13 @@ def run_xgen(
 
 @router.get("/xgen/jobs", response_model=list[schemas.XGenJobOut])
 def list_xgen_jobs(demo_id: UUID | None = None, db: Session = Depends(get_db)):
-    return crud.list_xgen_jobs(db, demo_id=demo_id)
+    jobs = crud.list_xgen_jobs(db, demo_id=demo_id)
+    out: list[schemas.XGenJobOut] = []
+    for job in jobs:
+        job_out = schemas.XGenJobOut.model_validate(job)
+        job_out.logs_uri = _presign_maybe(job_out.logs_uri)
+        out.append(job_out)
+    return out
 
 
 @router.get("/xgen/jobs/{job_id}", response_model=schemas.XGenJobOut)
@@ -189,7 +216,9 @@ def get_xgen_job(job_id: UUID, db: Session = Depends(get_db)):
     job = crud.get_xgen_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    return job
+    out = schemas.XGenJobOut.model_validate(job)
+    out.logs_uri = _presign_maybe(out.logs_uri)
+    return out
 
 
 @router.get("/datasets/{dataset_id}", response_model=schemas.DatasetOut)
@@ -263,7 +292,13 @@ def run_xmimic(
 
 @router.get("/xmimic/jobs", response_model=list[schemas.XMimicJobOut])
 def list_xmimic_jobs(dataset_id: UUID | None = None, db: Session = Depends(get_db)):
-    return crud.list_xmimic_jobs(db, dataset_id=dataset_id)
+    jobs = crud.list_xmimic_jobs(db, dataset_id=dataset_id)
+    out: list[schemas.XMimicJobOut] = []
+    for job in jobs:
+        job_out = schemas.XMimicJobOut.model_validate(job)
+        job_out.logs_uri = _presign_maybe(job_out.logs_uri)
+        out.append(job_out)
+    return out
 
 
 @router.get("/xmimic/jobs/{job_id}", response_model=schemas.XMimicJobOut)
@@ -271,7 +306,9 @@ def get_xmimic_job(job_id: UUID, db: Session = Depends(get_db)):
     job = crud.get_xmimic_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    return job
+    out = schemas.XMimicJobOut.model_validate(job)
+    out.logs_uri = _presign_maybe(out.logs_uri)
+    return out
 
 
 @router.get("/policies/{policy_id}", response_model=schemas.PolicyOut)
@@ -279,12 +316,20 @@ def get_policy(policy_id: UUID, db: Session = Depends(get_db)):
     policy = crud.get_policy(db, policy_id)
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
-    return policy
+    out = schemas.PolicyOut.model_validate(policy)
+    out.checkpoint_uri = create_presigned_get(_normalize_s3_key(out.checkpoint_uri))
+    return out
 
 
 @router.get("/policies", response_model=list[schemas.PolicyOut])
 def list_policies(xmimic_job_id: UUID | None = None, db: Session = Depends(get_db)):
-    return crud.list_policies(db, xmimic_job_id=xmimic_job_id)
+    policies = crud.list_policies(db, xmimic_job_id=xmimic_job_id)
+    out: list[schemas.PolicyOut] = []
+    for policy in policies:
+        policy_out = schemas.PolicyOut.model_validate(policy)
+        policy_out.checkpoint_uri = create_presigned_get(_normalize_s3_key(policy_out.checkpoint_uri))
+        out.append(policy_out)
+    return out
 
 
 class EvalRunRequest(BaseModel):
@@ -339,11 +384,11 @@ def review_quality(
 
 
 @router.get("/rewards/me", response_model=list[schemas.RewardEventOut])
-def get_rewards_me(db: Session = Depends(get_db)):
-    user = db.query(models.User).first()
-    if not user:
-        return []
-    return crud.list_reward_events_for_user(db, user.id)
+def get_rewards_me(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    return crud.list_reward_events_for_user(db, current_user.id)
 
 
 @router.get("/health")
@@ -387,7 +432,7 @@ def list_failed_jobs(
                 id=job.id,
                 status=job.status,
                 error=job.error,
-                logs_uri=job.logs_uri,
+                logs_uri=_presign_maybe(job.logs_uri),
                 demo_id=job.demo_id,
                 started_at=job.started_at,
                 finished_at=job.finished_at,
@@ -400,7 +445,7 @@ def list_failed_jobs(
                 id=job.id,
                 status=job.status,
                 error=job.error,
-                logs_uri=job.logs_uri,
+                logs_uri=_presign_maybe(job.logs_uri),
                 dataset_id=job.dataset_id,
                 started_at=job.started_at,
                 finished_at=job.finished_at,

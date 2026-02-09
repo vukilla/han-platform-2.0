@@ -120,9 +120,12 @@ class XMimicJob(Base, TimestampMixin):
     dataset_id = Column(UUID(as_uuid=True), ForeignKey("datasets.id"), nullable=False)
     mode = Column(String, nullable=False, default="nep")
     status = Column(String, nullable=False, default="QUEUED")
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
     idempotency_key = Column(String, nullable=True, index=True)
     params_json = Column(JSONB, nullable=True)
     logs_uri = Column(String, nullable=True)
+    error = Column(String, nullable=True)
 
     dataset = relationship("Dataset")
 

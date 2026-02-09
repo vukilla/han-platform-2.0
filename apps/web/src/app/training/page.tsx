@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -13,6 +14,7 @@ export default function TrainingPage() {
   const [distillation, setDistillation] = useState("teacher_student");
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,10 +48,12 @@ export default function TrainingPage() {
       return;
     }
     setError(null);
+    setJobId(null);
     setStatus("Starting XMimic job...");
     try {
       const job = await runXmimic(datasetId, mode, { distillation });
-      setStatus(`XMimic job ${job.id} started (${job.status}).`);
+      setJobId(job.id);
+      setStatus(`XMimic job started (${job.status}).`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start training");
       setStatus(null);
@@ -108,6 +112,16 @@ export default function TrainingPage() {
           <Button onClick={handleStartTraining}>Start training</Button>
           {selectedDataset ? (
             <p className="text-xs text-black/60">Selected dataset: {selectedDataset.id}</p>
+          ) : null}
+          {jobId ? (
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <Link href={`/xmimic/${jobId}`} className="font-semibold text-black underline">
+                View XMimic job
+              </Link>
+              <Link href="/policies" className="font-semibold text-black underline">
+                View policies
+              </Link>
+            </div>
           ) : null}
           {status ? <p className="text-sm text-emerald-700">{status}</p> : null}
           {error ? <p className="text-sm text-rose-700">{error}</p> : null}

@@ -5,35 +5,30 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
-import { getXgenJob, XGenJobOut } from "@/lib/api";
+import { getXmimicJob, XMimicJobOut } from "@/lib/api";
 
 const stages = [
-  "INGEST_VIDEO",
-  "ESTIMATE_POSE",
-  "RETARGET",
-  "CONTACT_SYNTH",
-  "NONCONTACT_SIM",
-  "AUGMENT",
-  "EXPORT_DATASET",
-  "RENDER_PREVIEWS",
+  "BUILD_ENV",
+  "TRAIN_TEACHER",
+  "DISTILL_STUDENT",
+  "EVAL_POLICY",
+  "EXPORT_CHECKPOINT",
   "QUALITY_SCORE",
 ];
 
-export default function JobProgressPage() {
+export default function XmimicJobProgressPage() {
   const params = useParams<{ id: string }>();
   const jobId = params?.id;
-  const [job, setJob] = useState<XGenJobOut | null>(null);
+  const [job, setJob] = useState<XMimicJobOut | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let timer: NodeJS.Timeout | null = null;
 
     async function fetchStatus() {
-      if (!jobId) {
-        return;
-      }
+      if (!jobId) return;
       try {
-        const response = await getXgenJob(jobId);
+        const response = await getXmimicJob(jobId);
         setJob(response);
         setError(null);
       } catch (err) {
@@ -45,17 +40,13 @@ export default function JobProgressPage() {
     timer = setInterval(fetchStatus, 3000);
 
     return () => {
-      if (timer) {
-        clearInterval(timer);
-      }
+      if (timer) clearInterval(timer);
     };
   }, [jobId]);
 
   const status = job?.status ?? null;
   const jobIsComplete = status === "COMPLETED";
   const jobIsFailed = status === "FAILED";
-  const datasetId = typeof job?.params_json?.dataset_id === "string" ? job?.params_json?.dataset_id : null;
-
   const currentIndex = status ? stages.indexOf(status) : -1;
   const stageLabel = (index: number) => {
     if (jobIsComplete) return "Completed";
@@ -71,13 +62,13 @@ export default function JobProgressPage() {
       <section className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <p className="section-eyebrow">Job progress</p>
-          <h1 className="text-3xl font-semibold text-black">XGen pipeline stages</h1>
+          <h1 className="text-3xl font-semibold text-black">XMimic training stages</h1>
           {jobId ? <p className="mt-2 text-sm text-black/60">{jobId}</p> : null}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <Badge label={status || "Queued"} tone={jobIsComplete ? "emerald" : jobIsFailed ? "rose" : "amber"} />
-          {datasetId ? (
-            <Link href={`/datasets/${datasetId}`} className="text-sm font-semibold text-black underline">
+          {job?.dataset_id ? (
+            <Link href={`/datasets/${job.dataset_id}`} className="text-sm font-semibold text-black underline">
               Open dataset
             </Link>
           ) : null}
@@ -100,13 +91,15 @@ export default function JobProgressPage() {
           </div>
         ))}
       </Card>
-      {error ? <p className="text-sm text-rose-700">{error}</p> : null}
-      {job?.demo_id ? (
+
+      {job?.mode ? (
         <p className="text-xs text-black/60">
-          Demo id: <span className="font-mono">{job.demo_id}</span>
+          Mode: <span className="font-mono">{job.mode}</span>
         </p>
       ) : null}
       {job?.error ? <p className="text-sm text-rose-700">Worker error: {job.error}</p> : null}
+      {error ? <p className="text-sm text-rose-700">{error}</p> : null}
     </div>
   );
 }
+

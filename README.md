@@ -10,6 +10,9 @@ HumanX Data Factory scaffolding: Next.js web app, FastAPI backend, XGen/XMimic s
    - Web: `http://localhost:3000`
    - API health: `http://localhost:8000/health`
 
+What to test (golden path):
+- `docs/WHAT_TO_TEST.md`
+
 ## GPU PC Setup (Windows, Isaac Sim + Isaac Lab)
 The current supported path (no WSL/virtualization required) is:
 - Windows gaming PC runs Isaac Sim + Isaac Lab (GPU compute only).

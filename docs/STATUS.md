@@ -6,6 +6,13 @@
 - Web dev server loads (fixed linux native deps by isolating container `node_modules` volume)
 - Large external artifacts live inside the repo under `external/humanoid-projects/` (no separate `~/humanoid-projects` required on laptop)
 - GPU-blocked work remains for Windows-native Isaac Sim/Isaac Lab runs (GPU PC) and GVHMR demo execution
+- Added golden-path runbook + UI affordances for testing:
+  - `docs/WHAT_TO_TEST.md`
+  - `/datasets` index page
+  - `/policies` index page
+  - `/xmimic/<job_id>` progress page
+  - XGen job page now exposes demo id, dataset id, and presigned logs download
+- Quality approval now mints MVP points (reward events) for approved demos/datasets
 - Paper-fidelity work continues on laptop: Table IV obs/reward schema parity and CPU-side contact refinement improvements
   - Relative motion reward parity tightened (Eq. 10 uses mean squared L2 norm).
   - Contact refinement upgraded: optional CPU robot IK refinement for contact frames (pre-physics).

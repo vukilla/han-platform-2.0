@@ -351,6 +351,49 @@ def review_quality_score(db: Session, entity_type, entity_id, status, notes=None
     db.add(quality)
     db.commit()
     db.refresh(quality)
+
+    # MVP incentives: award points when an entity is approved by a validator.
+    # Keep this logic idempotent so repeated approvals don't mint multiple events.
+    if status == "approved":
+        user_id = None
+        points = 0
+        reason = None
+
+        if entity_type == "demo":
+            demo = get_demo(db, entity_id)
+            if demo and demo.uploader_id:
+                user_id = demo.uploader_id
+                points = 10
+                reason = "quality_approved_demo"
+        elif entity_type == "dataset":
+            dataset = get_dataset(db, entity_id)
+            if dataset and dataset.source_demo and dataset.source_demo.uploader_id:
+                user_id = dataset.source_demo.uploader_id
+                points = 5
+                reason = "quality_approved_dataset"
+
+        if user_id and reason and points:
+            existing = (
+                db.query(models.RewardEvent)
+                .filter(
+                    models.RewardEvent.user_id == user_id,
+                    models.RewardEvent.entity_type == entity_type,
+                    models.RewardEvent.entity_id == entity_id,
+                    models.RewardEvent.reason == reason,
+                )
+                .first()
+            )
+            if not existing:
+                event = models.RewardEvent(
+                    user_id=user_id,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    points=points,
+                    reason=reason,
+                )
+                db.add(event)
+                db.commit()
+
     return quality
 
 

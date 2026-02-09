@@ -76,14 +76,26 @@ export async function annotateDemo(
 }
 
 export async function runXgen(demoId: string, params_json?: Record<string, unknown>) {
-  return apiFetch<{ id: string; status: string }>(`/demos/${demoId}/xgen/run`, {
+  return apiFetch<XGenJobOut>(`/demos/${demoId}/xgen/run`, {
     method: "POST",
     body: JSON.stringify({ params_json }),
   });
 }
 
+export type XGenJobOut = {
+  id: string;
+  demo_id: string;
+  status: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  params_json?: Record<string, unknown> | null;
+  logs_uri?: string | null;
+  error?: string | null;
+  idempotency_key?: string | null;
+};
+
 export async function getXgenJob(jobId: string) {
-  return apiFetch<{ id: string; status: string }>(`/xgen/jobs/${jobId}`);
+  return apiFetch<XGenJobOut>(`/xgen/jobs/${jobId}`);
 }
 
 export type DatasetOut = {
@@ -122,10 +134,49 @@ export async function listDatasets(projectId?: string) {
 }
 
 export async function runXmimic(datasetId: string, mode: "nep" | "mocap", params_json?: Record<string, unknown>) {
-  return apiFetch<{ id: string; status: string }>(`/datasets/${datasetId}/xmimic/run`, {
+  return apiFetch<XMimicJobOut>(`/datasets/${datasetId}/xmimic/run`, {
     method: "POST",
     body: JSON.stringify({ mode, params_json }),
   });
+}
+
+export type XMimicJobOut = {
+  id: string;
+  dataset_id: string;
+  mode: string;
+  status: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  params_json?: Record<string, unknown> | null;
+  logs_uri?: string | null;
+  error?: string | null;
+  idempotency_key?: string | null;
+};
+
+export async function getXmimicJob(jobId: string) {
+  return apiFetch<XMimicJobOut>(`/xmimic/jobs/${jobId}`);
+}
+
+export async function listXmimicJobs(datasetId?: string) {
+  const query = datasetId ? `?dataset_id=${datasetId}` : "";
+  return apiFetch<XMimicJobOut[]>(`/xmimic/jobs${query}`);
+}
+
+export type PolicyOut = {
+  id: string;
+  xmimic_job_id: string;
+  checkpoint_uri: string;
+  exported_at?: string | null;
+  metadata_json?: Record<string, unknown> | null;
+};
+
+export async function listPolicies(xmimicJobId?: string) {
+  const query = xmimicJobId ? `?xmimic_job_id=${xmimicJobId}` : "";
+  return apiFetch<PolicyOut[]>(`/policies${query}`);
+}
+
+export async function getPolicy(policyId: string) {
+  return apiFetch<PolicyOut>(`/policies/${policyId}`);
 }
 
 export type EvalRunOut = {
@@ -142,6 +193,11 @@ export type EvalRunOut = {
 
 export async function getEval(evalId: string) {
   return apiFetch<EvalRunOut>(`/eval/${evalId}`);
+}
+
+export async function listEvalRuns(policyId?: string) {
+  const query = policyId ? `?policy_id=${policyId}` : "";
+  return apiFetch<EvalRunOut[]>(`/eval${query}`);
 }
 
 export type RewardEventOut = {
