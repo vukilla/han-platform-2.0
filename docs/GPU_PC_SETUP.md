@@ -1,128 +1,83 @@
-# GPU PC Setup (RTX 5090) for HumanX Runs
+# GPU PC Setup (Windows, Isaac Sim + Isaac Lab)
 
-Goal: run the GPU-blocked parts (Isaac Gym / PhysHOI / GVHMR) on the Windows gaming PC, while keeping the laptop as the "control plane" (web/api/db/redis/minio).
+Goal: run the GPU-heavy parts (simulation, training, inference) on the Windows gaming PC **without WSL/virtualization**, while keeping the MacBook as the "control plane" (web/api/db/redis/minio).
 
-This doc assumes you will run Linux on the PC for stability. If you must use WSL2, expect more friction with Isaac Gym.
+If you can only do Windows on the PC, this is the supported path.
 
-## 0) Recommended Layout
+## 0) What Runs Where
 
-Keep everything under the repo to avoid path confusion:
-- Clone repo on the PC (same repo): `han-platform-2.0`
-- External repos + checkpoints are rehydrated under `external/` (not committed to GitHub).
+MacBook (control plane):
+- `docker compose -f infra/docker-compose.yml up --build`
+- Postgres, Redis, MinIO, FastAPI API, CPU worker, Next.js web app
 
-Fastest path:
-```
-scripts/gpu/bootstrap.sh
-```
+Windows gaming PC (GPU compute only):
+- Isaac Sim + Isaac Lab (Windows native)
+- GPU worker process (Celery `gpu` queue), pointing to the MacBook over LAN
 
-## 1) OS + Driver
+## 1) One-Time Installs on the Windows PC
 
-Recommended:
-- Ubuntu 22.04 (native install or dual boot).
+Install these (GUI installers are fine):
+1. NVIDIA driver (latest)
+2. Git for Windows
+3. VS Code
+4. Miniconda (optional; only needed if you want a separate conda env for RL frameworks)
 
-Minimum checks:
-- `nvidia-smi` works.
-- Driver is recent enough for RTX 5090 (Blackwell).
+Optional but recommended:
+- Enable Windows Developer Mode (for symlinks). Isaac Lab prefers an `_isaac_sim` symlink.
 
-## 2) Base Packages
+## 2) Clone This Repo on the Windows PC
 
-Install:
-- `git`
-- `python3` (for tooling) and Miniconda (recommended)
-- build essentials: `build-essential`, `cmake`, `ninja-build`
-
-## 3) Clone Repo
-
-Clone on PC:
-```
-git clone <your-repo-url> han-platform-2.0
+Choose a short path, for example `C:\\src`:
+```powershell
+mkdir C:\src
+cd C:\src
+git clone https://github.com/vukilla/han-platform-2.0.git
 cd han-platform-2.0
 ```
 
-Alternative (no GitHub yet): if you copied `han-platform-2.0.bundle` to the PC:
-```
-git clone han-platform-2.0.bundle han-platform-2.0
-cd han-platform-2.0
-```
+## 3) Install Isaac Sim (Windows Native)
 
-## 4) Python Envs
+1. Download the Windows build of Isaac Sim from NVIDIA's official docs site.
+2. Extract it to: `C:\isaacsim` (no spaces in the path).
 
-PhysHOI commonly expects Python 3.9.
+You should end up with a file like:
+- `C:\isaacsim\isaac-sim.bat`
 
-Create env (conda recommended):
-```
-conda create -n physhoi python=3.9 -y
-conda activate physhoi
-```
+## 4) Bootstrap Isaac Lab Inside This Repo
 
-Install PhysHOI deps:
-```
-pip install -r external/physhoi/requirements.txt
+From the repo root in PowerShell:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\preflight.ps1
+powershell -ExecutionPolicy Bypass -File scripts\windows\bootstrap_isaaclab.ps1 -IsaacSimPath C:\isaacsim
 ```
 
-## 5) Isaac Gym (Preview 4)
+This will:
+- clone Isaac Lab into `external\isaaclab` (not committed to git)
+- create `external\isaaclab\_isaac_sim` pointing at `C:\isaacsim`
+- install Isaac Lab extensions using Isaac Sim's bundled Python (no conda required)
+- run a quick import smoke test
 
-Download Isaac Gym Preview 4 from NVIDIA and extract it somewhere on the PC.
+## 5) Point the GPU Worker at the Mac Control Plane
 
-Typical location:
-- `external/humanoid-projects/isaacgym/`
-
-Then follow PhysHOI README expectations (Isaac Gym python package must be importable).
-
-Sanity check:
-```
-python -c "from isaacgym import gymapi; print('isaacgym ok')"
-```
-
-If Isaac Gym fails due to RTX 5090 compute capability / CUDA compatibility:
-- Pivot to Isaac Lab (supported path) and treat PhysHOI as a reference baseline only.
-
-## 6) Checkpoints
-
-If you cloned from GitHub, you will not have checkpoints yet (by design).
-
-Use the bootstrap script to download/place what it can and prompt for the license-gated Isaac Gym archive:
-```
-scripts/gpu/bootstrap.sh
+On the Windows PC, set environment variables (replace `<MAC_LAN_IP>`):
+```powershell
+$env:REDIS_URL      = "redis://<MAC_LAN_IP>:6379/0"
+$env:DATABASE_URL   = "postgresql+psycopg://han:han@<MAC_LAN_IP>:5432/han"
+$env:S3_ENDPOINT    = "http://<MAC_LAN_IP>:9000"
+$env:S3_ACCESS_KEY  = "minioadmin"
+$env:S3_SECRET_KEY  = "minioadmin"
+$env:S3_BUCKET      = "humanx-dev"
+$env:CELERY_GPU_QUEUE = "gpu"
 ```
 
-If you already staged checkpoints locally (e.g., from laptop transfer), place them under:
-- `external/gvhmr/inputs/checkpoints/...`
-- `external/humanoid-projects/PhysHOI/physhoi_checkpoints.zip`
-
-## 7) Install PhysHOI Checkpoints Into Repo Clone
-
-From the PC repo root:
-```
-./scripts/install_physhoi_checkpoints.sh
+Then run the GPU worker (inside the Isaac Lab conda env):
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\run_gpu_worker.ps1
 ```
 
-This populates:
-- `external/physhoi/physhoi/data/models/<task>/nn/PhysHOI.pth`
+## 6) Legacy (Linux/Isaac Gym/PhysHOI)
 
-## 8) Run PhysHOI Baseline Inference (Unblocks HAN-142)
+The older Isaac Gym/PhysHOI path is still documented under:
+- `scripts/gpu/*`
 
-Example:
-```
-./scripts/run_physhoi_inference.sh \
-  external/physhoi/physhoi/data/motions/BallPlay/toss.pt \
-  external/physhoi/physhoi/data/models/toss/nn/PhysHOI.pth \
-  16 PhysHOI_BallPlay --headless
-```
-
-Capture:
-- full terminal logs
-- `nvidia-smi` output during run
-- any generated videos/renders
-
-## 9) Run GVHMR Demo (Unblocks HAN-150 Prereq)
-
-After GVHMR deps are installed in its env, run something like:
-```
-cd external/gvhmr
-python tools/demo.py --video_path /path/to/sample.mp4 --ckpt inputs/checkpoints/gvhmr/gvhmr_siga24_release.ckpt
-```
-
-## 10) Remote Dev (Optional but Recommended)
-
-Install SSH server on PC and use VS Code Remote-SSH.
+It assumes Linux and is not the recommended approach for this project given the current constraints.

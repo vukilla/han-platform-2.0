@@ -6,7 +6,7 @@ Source of truth:
 This document maps the HumanX paper components (XGen + XMimic + deployment) to concrete code in this repo, and flags what is:
 - OK: implemented in code and exercised by at least a smoke test or runnable script
 - PARTIAL: implemented as scaffolding or an approximation; needs correctness work to match the paper
-- GPU-BLOCKED: implemented in code, but requires GPU PC deps (Isaac Gym / PhysHOI / GVHMR runtime) to run end-to-end
+- GPU-BLOCKED: implemented in code, but requires GPU PC deps (Windows-native Isaac Sim / Isaac Lab, plus GVHMR runtime) to run end-to-end
 - MISSING: not implemented yet
 
 ## Repo Entry Points
@@ -33,9 +33,10 @@ PhysHOI baseline inference (GPU PC):
   - `assets/objects/cargo_box.urdf`
   - `services/xmimic/configs/robot_spec.yaml`
   - `services/xmimic/scripts/robot_spec_validate.py`
-- Isaac Gym parallel sim harness (GPU-BLOCKED)
-  - `services/xmimic/xmimic/isaac/cargo_env.py`
-  - `docs/PHYSHOI.md`
+- Isaac Sim / Isaac Lab parallel sim harness (MISSING; current code is Isaac Gym legacy)
+  - Legacy stub: `services/xmimic/xmimic/isaac/cargo_env.py`
+  - Planned: `services/xmimic/xmimic/isaaclab/...`
+  - Notes: `docs/ISAAC_LAB_MIGRATION.md`
 
 ## 2) XGen (Video -> Physically Plausible Interaction Clips)
 
@@ -167,4 +168,4 @@ These are the main remaining deltas vs the paper, even aside from GPU availabili
 - Force-closure refinement needs a full SQP/contact constraint loop (joint-level IK exists; friction cone / penetration constraints remain).
 - Reward parity still needs integration into a real sim environment step (current code + tests exist, but env stubs do not emit all signals).
 - Observation parity is enforced at the schema level (Table IV mapping + tests), but needs end-to-end env instrumentation.
-- Isaac Gym + PhysHOI full runs are GPU PC dependent (see `HAN-142`, `HAN-150`).
+- Isaac Sim / Isaac Lab runs are GPU PC dependent (see `HAN-142`, `HAN-150` equivalents once renamed).

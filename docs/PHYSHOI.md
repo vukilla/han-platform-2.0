@@ -1,6 +1,8 @@
 # PhysHOI Base Repo
 
-This repo is used as the base Isaac Gym + imitation stack.
+Legacy note:
+- PhysHOI uses Isaac Gym (Linux-focused) and is kept here as optional reference material.
+- The current supported GPU path for this project is Windows-native Isaac Sim + Isaac Lab.
 
 ## Clone
 ```

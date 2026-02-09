@@ -5,7 +5,7 @@
 - API health check passes: `GET http://localhost:8000/health`
 - Web dev server loads (fixed linux native deps by isolating container `node_modules` volume)
 - Large external artifacts live inside the repo under `external/humanoid-projects/` (no separate `~/humanoid-projects` required on laptop)
-- GPU-blocked work remains for PhysHOI/Isaac Gym runs (`HAN-142`, `HAN-150`) and GVHMR demo execution
+- GPU-blocked work remains for Windows-native Isaac Sim/Isaac Lab runs (GPU PC) and GVHMR demo execution
 - Paper-fidelity work continues on laptop: Table IV obs/reward schema parity and CPU-side contact refinement improvements
   - Relative motion reward parity tightened (Eq. 10 uses mean squared L2 norm).
   - Contact refinement upgraded: optional CPU robot IK refinement for contact frames (pre-physics).
@@ -147,5 +147,5 @@
 
 ## Open items needed
 - MAC_LAN_IP to configure GPU worker env and open firewall ports 6379/9000/9001
-- Isaac Gym Preview 4 download + install on RTX 5090 PC (license-gated).
-- Transfer GVHMR checkpoints + PhysHOI checkpoints from laptop staging to RTX 5090 PC.
+- Isaac Sim (Windows) install + Isaac Lab bootstrap on the RTX 5090 PC.
+- Transfer GVHMR checkpoints to the RTX 5090 PC (if running GVHMR there).

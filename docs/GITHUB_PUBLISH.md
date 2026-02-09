@@ -39,4 +39,4 @@ git clone han-platform-2.0.bundle han-platform-2.0
 
 ## Notes
 - `external/`, `tmp/`, `.env`, venvs, and large checkpoints are excluded by `.gitignore`.
-- The GPU bootstrap scripts rehydrate `external/` on the gaming PC.
+- The Windows GPU setup scripts (`scripts/windows/*`) rehydrate `external/` on the gaming PC.

@@ -14,4 +14,10 @@ PhysHOI uses Isaac Gym (legacy) with SMPL‑X humanoid assets and BallPlay motio
 - Potential changes in sim fidelity and performance characteristics.
 
 ## Recommendation
-Keep Isaac Gym for immediate replication and benchmarking (PhysHOI parity). Start a parallel Isaac Lab branch for long‑term support once baseline reproduction is stable.
+Given the current constraint (Windows GPU PC without WSL/virtualization), treat **Isaac Lab as the primary path**.
+
+Plan:
+1. Bring up Isaac Sim + Isaac Lab on Windows and prove we can run a headless sim + a trivial task.
+2. Add an adapter layer in `services/xmimic` that maps Isaac Lab env signals into the HumanX Table IV observation schema.
+3. Port the first end-to-end task (Cargo Pickup) into Isaac Lab assets/configs.
+4. Keep PhysHOI/Isaac Gym as optional reference material only (Linux-only), not as a dependency for the main platform.

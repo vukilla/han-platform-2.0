@@ -10,15 +10,17 @@ HumanX Data Factory scaffolding: Next.js web app, FastAPI backend, XGen/XMimic s
    - Web: `http://localhost:3000`
    - API health: `http://localhost:8000/health`
 
-## GPU PC Setup (PhysHOI/GVHMR/Isaac Gym)
-External repos + checkpoints are not committed. On the gaming PC:
-1. Clone this repo.
-2. From repo root run:
-   - `scripts/gpu/bootstrap.sh`
-3. If Isaac Gym is not installed yet, follow the prompt and run:
-   - `scripts/gpu/install_isaacgym.sh`
+## GPU PC Setup (Windows, Isaac Sim + Isaac Lab)
+The current supported path (no WSL/virtualization required) is:
+- Windows gaming PC runs Isaac Sim + Isaac Lab (GPU compute only).
+- Mac runs the control-plane stack via Docker Compose.
 
-Codex agent instructions for the GPU PC are in `AGENTS.md`.
+Start here:
+- `docs/ISAACLAB_WINDOWS_SETUP.md`
+- `docs/GPU_PC_SETUP.md`
+- `docs/FIRST_PROMPT_GPU_PC.md`
+
+Legacy Isaac Gym/PhysHOI scripts remain under `scripts/gpu/` but assume Linux and are not the recommended path.
 
 ## GitHub Notes
 - `.gitignore` excludes `external/`, `tmp/`, `.env`, venvs, node_modules, and large checkpoints.
