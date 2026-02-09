@@ -455,17 +455,51 @@ def list_failed_jobs(
 
 
 @router.get("/ops/workers")
-def list_workers(
-):
+def list_workers(timeout: float = 2.0, include_stats: bool = False) -> dict[str, Any]:
     """Return best-effort Celery worker connectivity info.
 
     Useful for confirming the Windows GPU worker is connected and subscribed to the `gpu` queue.
     """
+    # Keep bounds tight so this endpoint stays responsive even when no workers are connected.
+    timeout = float(timeout)
+    if timeout < 0.5:
+        timeout = 0.5
+    if timeout > 5.0:
+        timeout = 5.0
+
     try:
-        inspect = celery_app.control.inspect(timeout=1.0)
+        inspect = celery_app.control.inspect(timeout=timeout)
+
+        # These are broadcast-style requests; a non-empty response indicates at least one
+        # worker is connected and responsive.
         ping = inspect.ping() or {}
         queues = inspect.active_queues() or {}
-        stats = inspect.stats() or {}
+        stats = inspect.stats() or {} if include_stats else {}
     except Exception as exc:
-        return {"ok": False, "error": str(exc), "ping": {}, "active_queues": {}, "stats": {}}
-    return {"ok": True, "ping": ping, "active_queues": queues, "stats": stats}
+        return {
+            "ok": False,
+            "error": str(exc),
+            "timeout": timeout,
+            "worker_names": [],
+            "has_gpu_queue": False,
+            "ping": {},
+            "active_queues": {},
+            "stats": {},
+        }
+
+    worker_names = sorted(set(ping.keys()) | set(queues.keys()) | set(stats.keys()))
+    has_gpu_queue = any(
+        (q or {}).get("name") == settings.celery_gpu_queue
+        for qlist in (queues or {}).values()
+        for q in (qlist or [])
+    )
+
+    return {
+        "ok": True,
+        "timeout": timeout,
+        "worker_names": worker_names,
+        "has_gpu_queue": has_gpu_queue,
+        "ping": ping,
+        "active_queues": queues,
+        "stats": stats,
+    }

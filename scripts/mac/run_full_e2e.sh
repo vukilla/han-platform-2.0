@@ -12,17 +12,35 @@ echo "== Full E2E (Mac + Windows GPU worker) =="
 
 echo ""
 echo "-- Waiting for GPU worker (Celery) --"
-deadline=$(( $(date +%s) + 180 ))
+deadline=$(( $(date +%s) + 900 ))
+last_print=0
 while true; do
   now=$(date +%s)
   if (( now > deadline )); then
-    echo "[ERROR] No Celery workers responded to ping within 3 minutes."
+    echo "[ERROR] No GPU Celery worker detected within 15 minutes."
     echo "Start the Windows GPU worker, then re-run:"
     echo "  $ROOT_DIR/scripts/smoke_e2e_with_gpu.sh"
     exit 1
   fi
 
-  workers_json="$(curl -sS http://localhost:8000/ops/workers || true)"
+  workers_json="$(curl -sS "http://localhost:8000/ops/workers?timeout=2.0" || true)"
+
+  if (( now - last_print >= 10 )); then
+    python - <<'PY' || true
+import json,sys
+try:
+  d=json.load(sys.stdin)
+except Exception:
+  print("Workers: (unavailable)")
+  raise SystemExit(0)
+names=d.get("worker_names") or []
+has_gpu=bool(d.get("has_gpu_queue"))
+print(f"Workers: {names} gpu_queue={has_gpu}")
+PY
+    <<<"$workers_json"
+    last_print=$now
+  fi
+
   ok="$(python - <<'PY'
 import json,sys
 try:
@@ -37,6 +55,9 @@ PY
     has_gpu="$(python - <<'PY'
 import json,sys
 d=json.load(sys.stdin)
+if d.get("has_gpu_queue") is True:
+  print("1")
+  raise SystemExit(0)
 queues=d.get("active_queues") or {}
 for _, qlist in queues.items():
   for q in qlist or []:
@@ -56,4 +77,3 @@ done
 
 echo ""
 "$ROOT_DIR/scripts/smoke_e2e_with_gpu.sh"
-
