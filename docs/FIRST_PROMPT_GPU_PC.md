@@ -19,6 +19,7 @@ Do these steps in order and summarize after each:
    - where to extract it (target: C:\\isaacsim)
    - what file(s) you expect to exist (isaac-sim.bat)
 3) Run `scripts\\windows\\bootstrap_isaaclab.ps1 -IsaacSimPath C:\\isaacsim`.
-4) Run `scripts\\windows\\run_gpu_worker.ps1` after I provide <MAC_LAN_IP> and confirm it can connect to Redis/MinIO on the Mac.
+4) Run `scripts\\windows\\run_gpu_worker.ps1 -MacIp <MAC_LAN_IP>` and confirm it can connect to Redis/MinIO on the Mac.
+   - Optional detached: `scripts\\windows\\start_gpu_worker_detached.ps1 -MacIp <MAC_LAN_IP>`
 5) If any step fails, write a short diagnosis and the minimal next action.
 ```

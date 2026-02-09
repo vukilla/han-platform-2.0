@@ -1,0 +1,45 @@
+param(
+  [Parameter(Mandatory = $true)]
+  [string]$MacIp
+)
+
+$ErrorActionPreference = "Stop"
+
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\\..")
+$runScript = Join-Path $repoRoot "scripts\\windows\\run_gpu_worker.ps1"
+$outLog = Join-Path $repoRoot "gpu_worker.out.log"
+$errLog = Join-Path $repoRoot "gpu_worker.err.log"
+
+if (-not $MacIp) {
+  throw "MacIp is required."
+}
+if (-not (Test-Path $runScript)) {
+  throw "Missing script: $runScript"
+}
+
+Write-Host "== Start GPU Worker (detached) ==" -ForegroundColor Cyan
+Write-Host "Repo root: $repoRoot"
+Write-Host "Mac IP:    $MacIp"
+Write-Host "Stdout:    $outLog"
+Write-Host "Stderr:    $errLog"
+Write-Host ""
+
+$args = @(
+  "-NoProfile",
+  "-ExecutionPolicy", "Bypass",
+  "-File", $runScript,
+  "-MacIp", $MacIp
+)
+
+Start-Process `
+  -FilePath "powershell.exe" `
+  -ArgumentList $args `
+  -WorkingDirectory $repoRoot `
+  -RedirectStandardOutput $outLog `
+  -RedirectStandardError $errLog `
+  -WindowStyle Hidden | Out-Null
+
+Write-Host "Started. Tail logs with:" -ForegroundColor Green
+Write-Host "  Get-Content -Path `"$outLog`" -Wait"
+Write-Host "  Get-Content -Path `"$errLog`" -Wait"
+

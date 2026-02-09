@@ -1,6 +1,6 @@
-# Minimal deps needed to run Celery workers (CPU/GPU) without pulling the web stack.
-# This is useful for the Windows GPU worker running inside Isaac Sim's Python env,
-# where FastAPI/Starlette pins can conflict with Isaac Lab.
+# Minimal dependencies for running the Celery worker on a separate machine (for example a Windows GPU PC).
+# This intentionally excludes web-server-only deps (FastAPI, Uvicorn) to reduce install surface and avoid
+# dependency conflicts inside Isaac Sim / Isaac Lab Python environments.
 
 sqlalchemy==2.0.36
 psycopg[binary]==3.2.3
@@ -11,4 +11,3 @@ celery==5.4.0
 redis==5.1.1
 tenacity==9.0.0
 PyJWT==2.9.0
-

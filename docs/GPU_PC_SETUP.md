@@ -59,7 +59,14 @@ This will:
 
 ## 5) Point the GPU Worker at the Mac Control Plane
 
-On the Windows PC, set environment variables (replace `<MAC_LAN_IP>`):
+You have two options.
+
+Option A (recommended): pass the Mac IP and let the script set env vars:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\run_gpu_worker.ps1 -MacIp <MAC_LAN_IP>
+```
+
+Option B: set env vars yourself (replace `<MAC_LAN_IP>`), then run:
 ```powershell
 $env:REDIS_URL      = "redis://<MAC_LAN_IP>:6379/0"
 $env:DATABASE_URL   = "postgresql+psycopg://han:han@<MAC_LAN_IP>:5432/han"
@@ -67,12 +74,13 @@ $env:S3_ENDPOINT    = "http://<MAC_LAN_IP>:9000"
 $env:S3_ACCESS_KEY  = "minioadmin"
 $env:S3_SECRET_KEY  = "minioadmin"
 $env:S3_BUCKET      = "humanx-dev"
-$env:CELERY_GPU_QUEUE = "gpu"
+
+powershell -ExecutionPolicy Bypass -File scripts\windows\run_gpu_worker.ps1
 ```
 
-Then run the GPU worker (inside the Isaac Lab conda env):
+Detached mode (runs in background, logs to files):
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\windows\run_gpu_worker.ps1
+powershell -ExecutionPolicy Bypass -File scripts\windows\start_gpu_worker_detached.ps1 -MacIp <MAC_LAN_IP>
 ```
 
 ## 6) Legacy (Linux/Isaac Gym/PhysHOI)

@@ -68,7 +68,17 @@ If symlink creation fails:
 ## Windows PC: Connect GPU Worker to the Mac
 
 1. Find the MacBook LAN IP address (example: `192.168.2.67`).
-2. On Windows, set env vars (replace `<MAC_LAN_IP>`):
+2. Start the GPU worker (recommended, only needs the IP):
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\run_gpu_worker.ps1 -MacIp <MAC_LAN_IP>
+```
+
+Optional: detached mode (runs in background and writes logs):
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\start_gpu_worker_detached.ps1 -MacIp <MAC_LAN_IP>
+```
+
+Alternative (manual env vars, replace `<MAC_LAN_IP>`):
 ```powershell
 $env:REDIS_URL      = "redis://<MAC_LAN_IP>:6379/0"
 $env:DATABASE_URL   = "postgresql+psycopg://han:han@<MAC_LAN_IP>:5432/han"
@@ -77,8 +87,7 @@ $env:S3_ACCESS_KEY  = "minioadmin"
 $env:S3_SECRET_KEY  = "minioadmin"
 $env:S3_BUCKET      = "humanx-dev"
 ```
-
-Then run:
+Then:
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\windows\run_gpu_worker.ps1
 ```

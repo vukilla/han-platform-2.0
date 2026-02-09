@@ -29,7 +29,8 @@ From `apps/api`:
 
 ```powershell
 pip install -r requirements.txt
-celery -A app.worker.celery_app worker -l info -Q gpu -c 1
+# Windows requires the solo pool.
+celery -A app.worker.celery_app worker -l info -Q gpu -P solo -c 1
 ```
 
 ## Docker (GPU)
