@@ -30,9 +30,9 @@ Write-Host "-- Tools --"
 foreach ($cmd in @("git", "conda", "python", "pip")) {
   if (Get-Command $cmd -ErrorAction SilentlyContinue) {
     $path = (Get-Command $cmd).Source
-    Write-Host "$cmd: OK ($path)"
+    Write-Host "${cmd}: OK ($path)"
   } else {
-    Write-Host "$cmd: MISSING"
+    Write-Host "${cmd}: MISSING"
   }
 }
 Write-Host ""
