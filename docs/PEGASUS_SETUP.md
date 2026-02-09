@@ -9,26 +9,8 @@ Important: use **your own Pegasus account**. Do not share passwords or use someo
 
 1. Your Pegasus username and access to login nodes:
    - `login1.pegasus.kl.dfki.de` (or `login2/3`)
-   - Note: these hostnames resolve to a private `192.168.33.x` address. From home, you must be on the DFKI network
-     (or connected via the DFKI Saarbrücken VPN) or you will see `Network is unreachable`.
 2. SSH access (prefer SSH keys, not passwords).
 3. GPU partition access (A100/H100/etc) and a basic Slurm workflow.
-
-## 0) Fix "Network is unreachable" (VPN / Routing)
-
-If this fails:
-```bash
-ssh <USER>@login1.pegasus.kl.dfki.de
-```
-and you see `Network is unreachable`, you are not on the right network yet. Confirm:
-
-```bash
-nslookup login1.pegasus.kl.dfki.de 8.8.8.8
-nc -vz -w 3 login1.pegasus.kl.dfki.de 22
-```
-
-If DNS returns `192.168.33.x` and `nc` fails, connect to the DFKI Saarbrücken VPN (ask your DFKI IT/contact for the
-VPN profile if you do not have it yet). Re-test `nc` until port 22 is reachable.
 
 ## 1) SSH Key Setup (from your laptop)
 
@@ -87,3 +69,4 @@ scripts/gpu/bootstrap.sh
 
 Use Remote-SSH to open `/netscratch/$USER/han-platform-2.0` on Pegasus.
 First prompt for a Codex agent on Pegasus: `docs/FIRST_PROMPT_PEGASUS.md`.
+
