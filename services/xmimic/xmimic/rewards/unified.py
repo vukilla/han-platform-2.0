@@ -125,11 +125,15 @@ def _l2_mean_sq(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.mean((a - b) ** 2))
 
 
-def _l2_mean_norm(a: np.ndarray, b: np.ndarray, eps: float = 1e-8) -> float:
-    diff = a - b
-    if diff.ndim == 1:
-        return float(np.linalg.norm(diff) + eps)
-    return float(np.mean(np.linalg.norm(diff, axis=-1) + eps))
+def _l2_mean_sq_norm(a: np.ndarray, b: np.ndarray) -> float:
+    """Mean squared L2 norm across the last dimension.
+
+    Paper mapping (HumanX Eq. 10): e_rel_p = ||u_t - u_hat_t||_2^2.
+    We average the squared norms across key bodies (and time, if present).
+    """
+    diff = np.asarray(a, dtype=np.float32) - np.asarray(b, dtype=np.float32)
+    sq = np.sum(diff**2, axis=-1)
+    return float(np.mean(sq))
 
 
 def _quat_error(a: np.ndarray, b: np.ndarray) -> float:
@@ -171,11 +175,11 @@ def _relative_vectors(body_pos: np.ndarray, object_pos: np.ndarray) -> np.ndarra
     if obj.ndim == 1:
         if obj.size != 3:
             raise ValueError(f"object_pos must be (3,), got {obj.shape}")
-        return body - obj.reshape((1, 3))
+        return obj.reshape((1, 3)) - body
     if obj.ndim != 2 or obj.shape[-1] != 3:
         raise ValueError(f"object_pos must be (T, 3) or (3,), got {obj.shape}")
     if body.ndim == 3 and body.shape[0] == obj.shape[0]:
-        return body - obj[:, None, :]
+        return obj[:, None, :] - body
     raise ValueError(f"Cannot broadcast body_pos {body.shape} with object_pos {obj.shape}")
 
 
@@ -223,9 +227,9 @@ def _compute_terms_from_config(
             rel_tgt = _relative_vectors(targets["key_body_pos"], targets["object_pos"])
 
     if rel_obs is not None and rel_tgt is not None:
-        # Eq (10): L2 norm between sets of relative vectors u_t and u_hat_t.
+        # Eq (10): mean squared L2 norm between sets of relative vectors u_t and u_hat_t.
         terms["relative_pos"] = _exp_term(
-            _l2_mean_norm(rel_obs, rel_tgt),
+            _l2_mean_sq_norm(rel_obs, rel_tgt),
             config.relative_pos,
         )
     if "relative_rot" in obs:

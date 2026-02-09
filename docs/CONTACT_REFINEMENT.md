@@ -12,3 +12,21 @@ result = refine_contact_phase(object_pose, anchors, contact_indices, contact_poi
 refined_pose = result.object_pose
 forces = result.contact_forces
 ```
+
+## Optional: CPU Robot IK Refinement (Pre-Physics)
+
+If you also have a retargeted robot trajectory, you can refine contact frames to better match
+end-effector targets (e.g. hands at object contact points) before any physics simulation:
+
+```python
+result = refine_contact_phase(
+    object_pose,
+    anchors,
+    contact_indices,
+    robot_urdf_path="assets/robots/generic_humanoid.urdf",
+    robot_joint_names=joint_names,
+    robot_qpos=robot_qpos,
+    tip_targets={"left_hand": left_targets, "right_hand": right_targets},
+)
+refined_robot_qpos = result.robot_qpos
+```

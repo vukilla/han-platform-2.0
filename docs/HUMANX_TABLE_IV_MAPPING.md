@@ -72,6 +72,13 @@ Dropout behavior:
 - In this repo, the schema excludes a mask by default; dropout should be implemented by the environment (e.g., staling/holding last MoCap sample).
 - `object_valid` remains available only as an opt-in debug hook (`mocap_dropout_mask=True`).
 
+Exact ordering is enforced by unit tests (`services/xmimic/tests/test_obs_pipeline.py`).
+
+For `services/xmimic/configs/robot_spec.yaml` (DoF=24, key bodies=5), the observation dimensions are:
+- Teacher: `(135 + num_skills) + 78 * history` (+4 if `object_rot` is enabled; +3/+4 for target object pose)
+- Student NEP: `(102 + num_skills) + 78 * history`
+- Student MoCap: `(105 + num_skills) + 78 * history` (+4 if `object_rot` is enabled)
+
 ## Rewards (Table IV)
 
 Table IV lists rewards as:
@@ -100,8 +107,11 @@ Table IV row -> reward key:
 Relative motion (paper Eq. 10) requires vectors `u_t` from key bodies to the object position.
 Implementation detail:
 - If `relative_pos` is not provided, we derive it automatically when `body_pos` and `object_pos` are present:
-  - `u_hat = body_pos - object_pos`
-  - `u_ref = target_body_pos - target_object_pos`
+  - `u_hat = object_pos - body_pos`
+  - `u_ref = target_object_pos - target_body_pos`
+
+Error metric parity:
+- Paper Eq. 10 uses a **squared** L2 norm: `||u - u_hat||_2^2` (averaged across key bodies, and time if present).
 
 ### Reg Terms (`r_reg`)
 

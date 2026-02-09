@@ -1,12 +1,14 @@
 # Han Platform 2.0 Status
 
-## Current state (2026-02-07)
+## Current state (2026-02-09)
 - Laptop local stack is running: `docker compose up` (Postgres/Redis/MinIO/API/worker/web)
 - API health check passes: `GET http://localhost:8000/health`
 - Web dev server loads (fixed linux native deps by isolating container `node_modules` volume)
 - Large external artifacts live inside the repo under `external/humanoid-projects/` (no separate `~/humanoid-projects` required on laptop)
 - GPU-blocked work remains for PhysHOI/Isaac Gym runs (`HAN-142`, `HAN-150`) and GVHMR demo execution
 - Paper-fidelity work continues on laptop: Table IV obs/reward schema parity and CPU-side contact refinement improvements
+  - Relative motion reward parity tightened (Eq. 10 uses mean squared L2 norm).
+  - Contact refinement upgraded: optional CPU robot IK refinement for contact frames (pre-physics).
 
 ## Current state (2026-02-04)
 - Monorepo scaffolded with apps/web, apps/api, services/xgen, services/xmimic, infra/docker-compose.yml
@@ -118,6 +120,9 @@
 - Added retargeting validator for EEF errors, joint limits, and foot skating (18.04).
 - Added observation pipeline with normalization + history buffers (19.06).
 - Added Table IV mapping doc and enforced observation schemas (teacher vs student, NEP vs MoCap) with tests (23.01).
+- Tightened relative-motion reward error metric to match Eq. 10 (mean squared L2 norm) + expanded reg/relative tests (23.02).
+- Made `xmimic` top-level imports lazy so schema/tests work without torch installed (23.03).
+- Added optional CPU robot IK refinement into XGen contact refinement pipeline (23.04).
 - Tightened unified reward parity: derived relative vectors `u_t` from key bodies + added missing `r_reg` terms with tests (23.02).
 - Upgraded XGen contact refinement with CPU IK refinement hook for joint-level alignment (23.03).
 - Added phase transition smoothing utility for body/object/vel series (20.05).

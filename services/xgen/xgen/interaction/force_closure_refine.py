@@ -201,20 +201,21 @@ def _build_ik_chain(
     if Chain is None:
         raise ImportError("ikpy is required for IK refinement (missing dependency)")
     base_elements = _base_elements_for_tip(urdf_path, tip_link=tip_link, root_link=root_link)
-    chain = Chain.from_urdf_file(
-        str(urdf_path),
-        base_elements=base_elements,
-        base_element_type="link",
-        symbolic=False,
-    )
-    # Always mark the synthetic base link as inactive.
-    try:
-        mask = np.asarray(chain.active_links_mask, dtype=bool).copy()
-        if mask.size > 0:
-            mask[0] = False
-        chain.active_links_mask = mask
-    except Exception:
-        pass
+    # ikpy emits a noisy warning for fixed base links before we can adjust the active mask.
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Link Base link .* is of type 'fixed' but set as active.*",
+            category=UserWarning,
+        )
+        chain = Chain.from_urdf_file(
+            str(urdf_path),
+            base_elements=base_elements,
+            base_element_type="link",
+            symbolic=False,
+        )
     if active_joints is not None:
         allowed = set(active_joints)
         # ikpy expects an active mask per link (URDF joint), including base.
@@ -225,6 +226,18 @@ def _build_ik_chain(
                 continue
             mask[i] = link.name in allowed
         chain.active_links_mask = np.asarray(mask, dtype=bool)
+
+    # Always mark fixed joints (including the synthetic base) as inactive.
+    try:
+        mask = np.asarray(chain.active_links_mask, dtype=bool).copy()
+        if mask.size > 0:
+            mask[0] = False
+        for i, link in enumerate(chain.links):
+            if getattr(link, "joint_type", None) == "fixed":
+                mask[i] = False
+        chain.active_links_mask = mask
+    except Exception:
+        pass
     return chain
 
 
@@ -239,6 +252,11 @@ def refine_contact_ik(
     active_joints_by_tip: Optional[Dict[str, Iterable[str]]] = None,
     max_joint_delta: float = 0.35,
     smooth_window: int = 0,
+    method: str = "dls",
+    max_iters: int = 25,
+    tol: float = 1e-4,
+    damping: float = 1e-2,
+    jac_eps: float = 1e-4,
 ) -> np.ndarray:
     """Refine robot joint angles during contact frames using CPU IK.
 
@@ -274,10 +292,25 @@ def refine_contact_ik(
         active = None
         if active_joints_by_tip is not None:
             active = active_joints_by_tip.get(tip)
+        else:
+            # By default, only solve over joints we actually control (avoid URDF joints not in joint_names).
+            active = joint_names
         chains[tip] = _build_ik_chain(urdf_path, tip_link=tip, root_link=root_link, active_joints=active)
+
+    if method not in ("ikpy", "dls"):
+        raise ValueError("method must be 'ikpy' or 'dls'")
 
     for tip, chain in chains.items():
         targets = tip_targets[tip]
+        # Cache active indices once per tip.
+        try:
+            active_mask = np.asarray(chain.active_links_mask, dtype=bool)
+        except Exception:
+            active_mask = np.ones((len(chain.links),), dtype=bool)
+            if active_mask.size > 0:
+                active_mask[0] = False
+        active_idx = np.nonzero(active_mask)[0].astype(int)
+
         for fi in contact:
             if fi < 0 or fi >= t_steps:
                 continue
@@ -288,7 +321,37 @@ def refine_contact_ik(
                     continue
                 if link.name in jidx:
                     q_init[li] = float(refined[fi, jidx[link.name]])
-            sol = chain.inverse_kinematics(targets[fi], initial_position=q_init)
+
+            if method == "ikpy":
+                sol = chain.inverse_kinematics(targets[fi], initial_position=q_init)
+            else:
+                # Damped-least-squares IK (Gauss-Newton) with numerical Jacobian, CPU-only.
+                q = q_init.astype(np.float32).copy()
+                tgt = np.asarray(targets[fi], dtype=np.float32).reshape(3)
+                for _ in range(max_iters):
+                    fk = chain.forward_kinematics(q)
+                    pos = np.asarray(fk[:3, 3], dtype=np.float32).reshape(3)
+                    err = tgt - pos
+                    if float(np.linalg.norm(err)) < tol:
+                        break
+                    if active_idx.size == 0:
+                        break
+                    # Numerical Jacobian J: (3, m) for active joints.
+                    J = np.zeros((3, int(active_idx.size)), dtype=np.float32)
+                    for ci, ji in enumerate(active_idx.tolist()):
+                        q2 = q.copy()
+                        q2[int(ji)] += float(jac_eps)
+                        fk2 = chain.forward_kinematics(q2)
+                        pos2 = np.asarray(fk2[:3, 3], dtype=np.float32).reshape(3)
+                        J[:, ci] = (pos2 - pos) / float(jac_eps)
+                    # dq = J^T (J J^T + lambda I)^-1 err
+                    JJt = J @ J.T
+                    JJt = JJt + float(damping) * np.eye(3, dtype=np.float32)
+                    dq = J.T @ np.linalg.solve(JJt, err)
+                    dq = np.clip(dq, -max_joint_delta, max_joint_delta).astype(np.float32)
+                    q[active_idx] = q[active_idx] + dq
+                sol = q
+
             # Write back solution for joints present in robot_qpos, with per-step delta clamp.
             for li, link in enumerate(chain.links):
                 if li == 0:
