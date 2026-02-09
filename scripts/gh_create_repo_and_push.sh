@@ -16,6 +16,9 @@ fi
 if ! gh auth status >/dev/null 2>&1; then
   echo "Not logged into GitHub via gh."
   echo "Run: gh auth login --hostname github.com --git-protocol https --web"
+  echo "If GitHub web/device auth is down, use a PAT:"
+  echo "  export GH_TOKEN='<YOUR_PAT>'"
+  echo "  echo \"\$GH_TOKEN\" | gh auth login --hostname github.com --with-token"
   exit 3
 fi
 
@@ -46,4 +49,3 @@ fi
 
 # If origin exists, just push.
 git push -u origin main
-
