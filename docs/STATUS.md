@@ -120,9 +120,12 @@
 - Added retargeting validator for EEF errors, joint limits, and foot skating (18.04).
 - Added observation pipeline with normalization + history buffers (19.06).
 - Added Table IV mapping doc and enforced observation schemas (teacher vs student, NEP vs MoCap) with tests (23.01).
+- Corrected Table IV student observation schema: removed `pd_error` from student (teacher-only) and updated docs/tests (23.05).
 - Tightened relative-motion reward error metric to match Eq. 10 (mean squared L2 norm) + expanded reg/relative tests (23.02).
 - Made `xmimic` top-level imports lazy so schema/tests work without torch installed (23.03).
 - Added optional CPU robot IK refinement into XGen contact refinement pipeline (23.04).
+- Upgraded CPU contact refinement: multi-tip SQP-style IK solve with posture regularization (23.06).
+- Reward parity: when deriving Eq. 10 relative vectors, prefer `key_body_pos` over `body_pos` and added regression test (23.07).
 - Tightened unified reward parity: derived relative vectors `u_t` from key bodies + added missing `r_reg` terms with tests (23.02).
 - Upgraded XGen contact refinement with CPU IK refinement hook for joint-level alignment (23.03).
 - Added phase transition smoothing utility for body/object/vel series (20.05).

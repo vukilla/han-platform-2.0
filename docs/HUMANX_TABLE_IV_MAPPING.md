@@ -37,7 +37,7 @@ Teacher (`pi_tea`) vs Student (`pi_stu`) parity, line-by-line:
 - `dof_pos`: teacher yes, student yes
 - `dof_vel`: teacher yes, student yes
 - `action`: teacher yes, student yes
-- `pd_error`: teacher yes, student yes
+- `pd_error`: teacher yes, student no
 - `ref_body_pos`: teacher yes, student no
 - `delta_body_pos`: teacher yes, student no
 - `object_pos`: teacher yes, student optional (`*`)
@@ -76,8 +76,8 @@ Exact ordering is enforced by unit tests (`services/xmimic/tests/test_obs_pipeli
 
 For `services/xmimic/configs/robot_spec.yaml` (DoF=24, key bodies=5), the observation dimensions are:
 - Teacher: `(135 + num_skills) + 78 * history` (+4 if `object_rot` is enabled; +3/+4 for target object pose)
-- Student NEP: `(102 + num_skills) + 78 * history`
-- Student MoCap: `(105 + num_skills) + 78 * history` (+4 if `object_rot` is enabled)
+- Student NEP: `(78 + num_skills) + 78 * history`
+- Student MoCap: `(81 + num_skills) + 78 * history` (+4 if `object_rot` is enabled)
 
 ## Rewards (Table IV)
 
@@ -106,9 +106,9 @@ Table IV row -> reward key:
 
 Relative motion (paper Eq. 10) requires vectors `u_t` from key bodies to the object position.
 Implementation detail:
-- If `relative_pos` is not provided, we derive it automatically when `body_pos` and `object_pos` are present:
-  - `u_hat = object_pos - body_pos`
-  - `u_ref = target_object_pos - target_body_pos`
+- If `relative_pos` is not provided, we derive it automatically when `key_body_pos` (preferred) or `body_pos` and `object_pos` are present:
+  - `u_hat = object_pos - key_body_pos` (or `object_pos - body_pos` fallback)
+  - `u_ref` computed from the corresponding reference signals.
 
 Error metric parity:
 - Paper Eq. 10 uses a **squared** L2 norm: `||u - u_hat||_2^2` (averaged across key bodies, and time if present).

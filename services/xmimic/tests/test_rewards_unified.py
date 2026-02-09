@@ -78,6 +78,19 @@ class TestUnifiedRewards(unittest.TestCase):
         )
         self.assertAlmostEqual(terms["relative_pos"], expected, places=6)
 
+    def test_relative_pos_prefers_key_body_pos_over_body_pos_when_both_present(self):
+        cfg = HumanXRewardConfig(relative_pos=RewardTerm(gamma=1.0, lambda_=1.0), regularization=0.0)
+        obj = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+        key_body = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)  # squared norm=1
+        body = np.array([[10.0, 0.0, 0.0]], dtype=np.float32)  # squared norm=100
+
+        terms = compute_reward_terms(
+            obs={"key_body_pos": key_body, "body_pos": body, "object_pos": obj},
+            targets={"key_body_pos": np.zeros_like(key_body), "body_pos": np.zeros_like(body), "object_pos": obj},
+            config=cfg,
+        )
+        self.assertAlmostEqual(terms["relative_pos"], math.exp(-1.0), places=6)
+
     def test_regularization_additional_table_iv_terms(self):
         cfg = HumanXRewardConfig(
             regularization=0.5,

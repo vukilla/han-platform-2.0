@@ -27,6 +27,9 @@ result = refine_contact_phase(
     robot_joint_names=joint_names,
     robot_qpos=robot_qpos,
     tip_targets={"left_hand": left_targets, "right_hand": right_targets},
+    # Multi-tip SQP-style solve (recommended when refining both hands together):
+    ik_method="sqp",
+    posture_weight=1e-3,
 )
 refined_robot_qpos = result.robot_qpos
 ```

@@ -55,6 +55,8 @@ def refine_contact_phase(
     tip_targets: dict[str, np.ndarray] | None = None,
     max_joint_delta: float = 0.35,
     smooth_window: int = 0,
+    ik_method: str = "auto",  # auto|dls|ikpy|sqp
+    posture_weight: float = 0.0,
 ) -> ContactRefineResult:
     updated = synthesize_contact(object_pose, anchor_positions, contact_indices)
     refined = force_closure_refine(updated, contact_indices, anchor_positions=anchor_positions)
@@ -73,6 +75,13 @@ def refine_contact_phase(
             raise ValueError(
                 "robot refinement requires robot_urdf_path, robot_joint_names, robot_qpos, and tip_targets"
             )
+        method = ik_method
+        if method == "auto":
+            method = "sqp" if len(tip_targets) > 1 else "dls"
+        pw = posture_weight
+        if pw <= 0.0 and method == "sqp":
+            # Small posture regularization keeps solutions close to the retargeted motion.
+            pw = 1e-3
         refined_robot = refine_contact_ik(
             urdf_path=robot_urdf_path,
             joint_names=robot_joint_names,
@@ -81,6 +90,8 @@ def refine_contact_phase(
             tip_targets=tip_targets,
             max_joint_delta=max_joint_delta,
             smooth_window=smooth_window,
+            method=method,
+            posture_weight=pw,
         )
 
     return ContactRefineResult(object_pose=refined, contact_forces=forces, robot_qpos=refined_robot)

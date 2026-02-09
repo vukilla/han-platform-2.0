@@ -256,6 +256,7 @@ def refine_contact_ik(
     max_iters: int = 25,
     tol: float = 1e-4,
     damping: float = 1e-2,
+    posture_weight: float = 0.0,
     jac_eps: float = 1e-4,
 ) -> np.ndarray:
     """Refine robot joint angles during contact frames using CPU IK.
@@ -297,8 +298,116 @@ def refine_contact_ik(
             active = joint_names
         chains[tip] = _build_ik_chain(urdf_path, tip_link=tip, root_link=root_link, active_joints=active)
 
-    if method not in ("ikpy", "dls"):
-        raise ValueError("method must be 'ikpy' or 'dls'")
+    if method not in ("ikpy", "dls", "sqp"):
+        raise ValueError("method must be 'ikpy', 'dls', or 'sqp'")
+
+    if method == "sqp":
+        # Multi-tip Gauss-Newton / SQP-style refinement with optional posture regularization.
+        # This solves all tip targets for each frame jointly, instead of sequentially per tip.
+        tip_list = list(tip_targets.keys())
+        global_active: List[int]
+        if active_joints_by_tip is None:
+            global_active = list(range(nq))
+        else:
+            active_set = set()
+            for joints in active_joints_by_tip.values():
+                for jn in joints:
+                    if jn in jidx:
+                        active_set.add(jidx[jn])
+            global_active = sorted(active_set)
+        if not global_active:
+            return refined
+        col_for_joint = {j: i for i, j in enumerate(global_active)}
+
+        # Precompute per-tip active chain indices and their mapped global columns.
+        tip_maps: Dict[str, Tuple["Chain", np.ndarray, np.ndarray]] = {}
+        for tip in tip_list:
+            chain = chains[tip]
+            try:
+                active_mask = np.asarray(chain.active_links_mask, dtype=bool)
+            except Exception:
+                active_mask = np.ones((len(chain.links),), dtype=bool)
+                if active_mask.size > 0:
+                    active_mask[0] = False
+            active_idx = np.nonzero(active_mask)[0].astype(int)
+
+            chain_idx: List[int] = []
+            cols: List[int] = []
+            for li in active_idx.tolist():
+                if li == 0:
+                    continue
+                lname = getattr(chain.links[int(li)], "name", "")
+                if lname in jidx and jidx[lname] in col_for_joint:
+                    chain_idx.append(int(li))
+                    cols.append(int(col_for_joint[jidx[lname]]))
+            tip_maps[tip] = (chain, np.asarray(chain_idx, dtype=int), np.asarray(cols, dtype=int))
+
+        for fi in contact:
+            if fi < 0 or fi >= t_steps:
+                continue
+
+            q_global = refined[fi].astype(np.float32).copy()
+            q_ref_global = np.asarray(robot_qpos[fi], dtype=np.float32)
+            q_active = q_global[global_active].astype(np.float32).copy()
+            q_ref = q_ref_global[global_active].astype(np.float32).copy()
+
+            for _ in range(max_iters):
+                # Objectives: match tip positions + (optional) remain close to original posture.
+                J_obj = np.zeros((3 * len(tip_list), len(global_active)), dtype=np.float32)
+                e_obj = np.zeros((3 * len(tip_list),), dtype=np.float32)
+
+                for ti, tip in enumerate(tip_list):
+                    chain, chain_idx, cols = tip_maps[tip]
+                    tgt = np.asarray(tip_targets[tip][fi], dtype=np.float32).reshape(3)
+
+                    # Build chain q vector from global qpos.
+                    q_chain = np.zeros((len(chain.links),), dtype=np.float32)
+                    for li, link in enumerate(chain.links):
+                        if li == 0:
+                            continue
+                        lname = getattr(link, "name", "")
+                        if lname in jidx:
+                            q_chain[li] = float(q_global[jidx[lname]])
+
+                    fk = chain.forward_kinematics(q_chain)
+                    pos = np.asarray(fk[:3, 3], dtype=np.float32).reshape(3)
+                    err = tgt - pos
+                    e_obj[3 * ti : 3 * ti + 3] = err
+
+                    # Numerical Jacobian for active joints in this chain.
+                    for ci, li in enumerate(chain_idx.tolist()):
+                        q2 = q_chain.copy()
+                        q2[int(li)] += float(jac_eps)
+                        fk2 = chain.forward_kinematics(q2)
+                        pos2 = np.asarray(fk2[:3, 3], dtype=np.float32).reshape(3)
+                        deriv = (pos2 - pos) / float(jac_eps)
+                        J_obj[3 * ti : 3 * ti + 3, int(cols[ci])] = deriv
+
+                if float(np.linalg.norm(e_obj)) < tol:
+                    break
+
+                J = J_obj
+                e = e_obj
+                if posture_weight > 0.0:
+                    sw = float(np.sqrt(float(posture_weight)))
+                    J_post = sw * np.eye(len(global_active), dtype=np.float32)
+                    e_post = sw * (q_ref - q_active)
+                    J = np.vstack([J_obj, J_post]).astype(np.float32)
+                    e = np.concatenate([e_obj, e_post]).astype(np.float32)
+
+                # Solve damped normal equations (Levenberg-Marquardt style).
+                A = (J.T @ J) + float(damping) * np.eye(len(global_active), dtype=np.float32)
+                b = J.T @ e
+                try:
+                    dq = np.linalg.solve(A, b).astype(np.float32)
+                except Exception:
+                    break
+                dq = np.clip(dq, -max_joint_delta, max_joint_delta).astype(np.float32)
+
+                q_active = (q_active + dq).astype(np.float32)
+                q_global[global_active] = q_active
+
+            refined[fi] = q_global
 
     for tip, chain in chains.items():
         targets = tip_targets[tip]

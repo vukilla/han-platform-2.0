@@ -235,7 +235,6 @@ def humanx_student_obs_config(
         ObsField("dof_pos", dof),
         ObsField("dof_vel", dof),
         ObsField("action", dof),
-        ObsField("pd_error", dof),
     ]
 
     if mode not in ("nep", "mocap"):

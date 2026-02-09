@@ -214,17 +214,17 @@ def _compute_terms_from_config(
     rel_obs = _first_present(obs, ["relative_pos"])
     if rel_obs is None:
         # Derive from key-body positions and object position (paper Eq. 10).
-        if "body_pos" in obs and "object_pos" in obs:
-            rel_obs = _relative_vectors(obs["body_pos"], obs["object_pos"])
-        elif "key_body_pos" in obs and "object_pos" in obs:
+        if "key_body_pos" in obs and "object_pos" in obs:
             rel_obs = _relative_vectors(obs["key_body_pos"], obs["object_pos"])
+        elif "body_pos" in obs and "object_pos" in obs:
+            rel_obs = _relative_vectors(obs["body_pos"], obs["object_pos"])
 
     rel_tgt = _first_present(targets, ["relative_pos"])
     if rel_tgt is None:
-        if "body_pos" in targets and "object_pos" in targets:
-            rel_tgt = _relative_vectors(targets["body_pos"], targets["object_pos"])
-        elif "key_body_pos" in targets and "object_pos" in targets:
+        if "key_body_pos" in targets and "object_pos" in targets:
             rel_tgt = _relative_vectors(targets["key_body_pos"], targets["object_pos"])
+        elif "body_pos" in targets and "object_pos" in targets:
+            rel_tgt = _relative_vectors(targets["body_pos"], targets["object_pos"])
 
     if rel_obs is not None and rel_tgt is not None:
         # Eq (10): mean squared L2 norm between sets of relative vectors u_t and u_hat_t.
