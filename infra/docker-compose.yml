@@ -1,0 +1,104 @@
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: han
+      POSTGRES_PASSWORD: han
+      POSTGRES_DB: han
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:latest
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  api:
+    build:
+      context: ../apps/api
+    environment:
+      DATABASE_URL: postgresql+psycopg://han:han@db:5432/han
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: humanx-dev
+      S3_REGION: us-east-1
+      S3_SECURE: "false"
+      CELERY_CPU_QUEUE: cpu
+      CELERY_GPU_QUEUE: gpu
+      CELERY_MAX_QUEUE_CPU: 100
+      CELERY_MAX_QUEUE_GPU: 20
+      CELERY_PREFETCH_MULTIPLIER: 1
+      CELERY_TASK_ACKS_LATE: "true"
+      CELERY_REJECT_ON_WORKER_LOST: "true"
+    depends_on:
+      - db
+      - redis
+      - minio
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../apps/api:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    build:
+      context: ../apps/api
+    environment:
+      DATABASE_URL: postgresql+psycopg://han:han@db:5432/han
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: humanx-dev
+      S3_REGION: us-east-1
+      S3_SECURE: "false"
+      CELERY_CPU_QUEUE: cpu
+      CELERY_GPU_QUEUE: gpu
+      CELERY_MAX_QUEUE_CPU: 100
+      CELERY_MAX_QUEUE_GPU: 20
+      CELERY_PREFETCH_MULTIPLIER: 1
+      CELERY_TASK_ACKS_LATE: "true"
+      CELERY_REJECT_ON_WORKER_LOST: "true"
+    depends_on:
+      - db
+      - redis
+      - minio
+    volumes:
+      - ../apps/api:/app
+    command: celery -A app.worker.celery_app worker -l info -Q cpu -c 2
+
+  web:
+    build:
+      context: ../apps/web
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../apps/web:/app
+      # Prevent host-installed node_modules (darwin) from breaking linux/arm64 native deps.
+      - web-node-modules:/app/node_modules
+    command: npm run dev -- --hostname 0.0.0.0 --port 3000
+
+volumes:
+  db-data:
+  minio-data:
+  web-node-modules:

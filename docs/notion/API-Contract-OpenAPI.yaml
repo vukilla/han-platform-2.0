@@ -1,0 +1,210 @@
+openapi: 3.0.3
+info:
+  title: HumanX Data Factory API
+  version: 0.1.0
+servers:
+  - url: http://localhost:8000
+paths:
+  /auth/login:
+    post:
+      summary: Login
+  /me:
+    get:
+      summary: Current user
+  /projects:
+    post:
+      summary: Create project
+    get:
+      summary: List projects
+  /projects/{id}:
+    get:
+      summary: Get project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+    patch:
+      summary: Update project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+    delete:
+      summary: Delete project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+  /demos:
+    post:
+      summary: Create demo
+    get:
+      summary: List demos
+  /demos/{id}/upload-url:
+    post:
+      summary: Create signed upload URL
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+  /demos/{id}/annotations:
+    post:
+      summary: Save demo annotations
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+  /demos/{id}:
+    get:
+      summary: Get demo
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+    patch:
+      summary: Update demo
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+    delete:
+      summary: Delete demo
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+  /demos/{id}/xgen/run:
+    post:
+      summary: Run XGen job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+  /xgen/jobs/{id}:
+    get:
+      summary: Get XGen job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+  /xgen/jobs:
+    get:
+      summary: List XGen jobs
+  /datasets/{id}:
+    get:
+      summary: Get dataset
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+  /datasets:
+    get:
+      summary: List datasets
+  /datasets/{id}/clips:
+    get:
+      summary: List dataset clips
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+  /datasets/{id}/download-url:
+    get:
+      summary: Create signed download URL
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+  /datasets/{id}/xmimic/run:
+    post:
+      summary: Run XMimic job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+  /xmimic/jobs/{id}:
+    get:
+      summary: Get XMimic job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+  /xmimic/jobs:
+    get:
+      summary: List XMimic jobs
+  /policies/{id}:
+    get:
+      summary: Get policy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+  /policies/{id}/eval/run:
+    post:
+      summary: Run evaluation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+  /eval/{id}:
+    get:
+      summary: Get evaluation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+  /eval:
+    get:
+      summary: List evaluations
+  /quality/{entity_type}/{id}:
+    get:
+      summary: Get quality score
+      parameters:
+        - name: entity_type
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+  /rewards/me:
+    get:
+      summary: Get reward events

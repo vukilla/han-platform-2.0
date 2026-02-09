@@ -1,0 +1,5 @@
+[project]
+name = "han-xmimic"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26", "torch>=2.2", "mlflow>=2.9", "pinocchio>=2.6", "PyYAML>=6.0"]

@@ -1,0 +1,15 @@
+[project]
+name = "han-xgen"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.26",
+  "opencv-python>=4.9",
+  "mediapipe>=0.10",
+  "ikpy>=3.4",
+  "mujoco>=3.1",
+  "trimesh>=4.0",
+  "torch>=2.1",
+  "smplx>=0.1.28",
+  "cvxpy>=1.5",
+]

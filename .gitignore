@@ -1,0 +1,51 @@
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtualenvs
+.venv/
+.venv_*/
+.venv_dev/
+venv/
+
+# Env files (never commit secrets)
+.env
+.env.*
+!.env.example
+!.env*.example
+
+# Node/Next
+node_modules/
+.next/
+dist/
+build/
+
+# Local artifacts
+tmp/
+*.log
+*.sqlite
+
+# External repos + checkpoints (rehydrated via scripts on GPU PC)
+external/
+!external/README.md
+
+# Large binary artifacts
+*.ckpt
+*.pth
+*.pt
+*.npz
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.mp4
+*.mov
+*.avi
