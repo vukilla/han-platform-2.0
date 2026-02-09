@@ -1,0 +1,14 @@
+# Minimal deps needed to run Celery workers (CPU/GPU) without pulling the web stack.
+# This is useful for the Windows GPU worker running inside Isaac Sim's Python env,
+# where FastAPI/Starlette pins can conflict with Isaac Lab.
+
+sqlalchemy==2.0.36
+psycopg[binary]==3.2.3
+pydantic==2.9.2
+pydantic-settings==2.5.2
+boto3==1.35.36
+celery==5.4.0
+redis==5.1.1
+tenacity==9.0.0
+PyJWT==2.9.0
+

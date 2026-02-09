@@ -98,8 +98,30 @@ if ($repoRoot.Path -match "OneDrive") {
 }
 Write-Host ""
 
+Write-Host "-- USD Python (pxr) Path Setup --" -ForegroundColor Cyan
+# Isaac Sim ships the USD (pxr) Python package as an extension under extscache. When running plain
+# `python.bat` (used by isaaclab.bat -p), pxr is not on PYTHONPATH/PATH by default.
+$extCacheDir = Join-Path $IsaacSimPath "extscache"
+if (Test-Path $extCacheDir) {
+  $usdLib = Get-ChildItem -Path $extCacheDir -Directory -Filter "omni.usd.libs-*" | Sort-Object Name -Descending | Select-Object -First 1
+  if ($usdLib) {
+    if ($env:PYTHONPATH) { $env:PYTHONPATH = "$env:PYTHONPATH;$($usdLib.FullName)" } else { $env:PYTHONPATH = "$($usdLib.FullName)" }
+    $usdBin = Join-Path $usdLib.FullName "bin"
+    if (Test-Path $usdBin) { $env:PATH = "$env:PATH;$usdBin" }
+    Write-Host "Added to PYTHONPATH: $($usdLib.FullName)"
+    if (Test-Path $usdBin) { Write-Host "Added to PATH: $usdBin" }
+  } else {
+    Write-Host "[WARN] omni.usd.libs-* not found under $extCacheDir. pxr imports may fail until Isaac Sim has populated extensions." -ForegroundColor Yellow
+  }
+} else {
+  Write-Host "[WARN] Isaac Sim extscache not found at: $extCacheDir. pxr imports may fail." -ForegroundColor Yellow
+}
+Write-Host ""
+
 Write-Host "-- Upgrading pip/setuptools/wheel in Isaac Sim Python --" -ForegroundColor Cyan
-Invoke-Checked $isaacLabBat @("-p", "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel")
+# Newer setuptools versions have removed pkg_resources, which breaks some source builds (for example flatdict).
+# Pin to a known-good setuptools that still ships pkg_resources.
+Invoke-Checked $isaacLabBat @("-p", "-m", "pip", "install", "--upgrade", "pip", "wheel", "setuptools==81.0.0")
 
 Write-Host "-- Ensuring PyTorch CUDA build (cu128) --" -ForegroundColor Cyan
 Invoke-Checked $isaacLabBat @(
@@ -107,6 +129,11 @@ Invoke-Checked $isaacLabBat @(
   "--index-url", "https://download.pytorch.org/whl/cu128",
   "torch==2.7.0", "torchvision==0.22.0"
 )
+
+Write-Host "-- Build Helper Deps (avoid PEP517 build isolation pitfalls) --" -ForegroundColor Cyan
+# flatdict publishes an sdist; without --no-build-isolation pip may create a build env with a setuptools that
+# doesn't include pkg_resources, causing the install to fail.
+Invoke-Checked $isaacLabBat @("-p", "-m", "pip", "install", "--no-build-isolation", "flatdict==4.0.1")
 
 Write-Host "-- Installing Isaac Lab Python packages (minimal set) --" -ForegroundColor Cyan
 $pkgs = @("isaaclab", "isaaclab_assets", "isaaclab_contrib", "isaaclab_tasks", "isaaclab_rl")
@@ -124,15 +151,15 @@ foreach ($pkg in $pkgs) {
     # Install RL frameworks as extras only when requested.
     $spec = "$pkgPath" + "[all]"
     Write-Host "Installing: $spec"
-    Invoke-Checked $isaacLabBat @("-p", "-m", "pip", "install", "--editable", $spec)
+    Invoke-Checked $isaacLabBat @("-p", "-m", "pip", "install", "--no-build-isolation", "--editable", $spec)
   } else {
     Write-Host "Installing: $pkgPath"
-    Invoke-Checked $isaacLabBat @("-p", "-m", "pip", "install", "--editable", $pkgPath)
+    Invoke-Checked $isaacLabBat @("-p", "-m", "pip", "install", "--no-build-isolation", "--editable", $pkgPath)
   }
 }
 
 Write-Host "-- Smoke Test: Imports --" -ForegroundColor Cyan
-$code = "import sys; print(sys.version); import isaacsim; print('isaacsim ok'); import isaaclab_rl; print('isaaclab_rl ok'); import isaaclab_tasks; print('isaaclab_tasks ok')"
+$code = "import sys; print(sys.version); import isaacsim; print('isaacsim ok'); import isaaclab; print('isaaclab ok'); import isaaclab_rl; print('isaaclab_rl ok'); import isaaclab_tasks; print('isaaclab_tasks ok')"
 Invoke-Checked $isaacLabBat @("-p", "-c", $code)
 
 Write-Host ""
