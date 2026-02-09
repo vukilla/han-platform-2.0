@@ -39,6 +39,12 @@ git clone <your-repo-url> han-platform-2.0
 cd han-platform-2.0
 ```
 
+Alternative (no GitHub yet): if you copied `han-platform-2.0.bundle` to the PC:
+```
+git clone han-platform-2.0.bundle han-platform-2.0
+cd han-platform-2.0
+```
+
 ## 4) Python Envs
 
 PhysHOI commonly expects Python 3.9.
