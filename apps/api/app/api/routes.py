@@ -13,7 +13,7 @@ from app.core.config import get_settings
 from app.core.queue import is_queue_full, get_queue_depth
 from app.core.storage import create_presigned_put, create_presigned_get, get_s3_client
 from app.db import get_db
-from app.worker import run_xgen_job, run_xmimic_job
+from app.worker import celery_app, run_xgen_job, run_xmimic_job
 
 router = APIRouter()
 settings = get_settings()
@@ -452,3 +452,20 @@ def list_failed_jobs(
             )
         )
     return failures
+
+
+@router.get("/ops/workers")
+def list_workers(
+):
+    """Return best-effort Celery worker connectivity info.
+
+    Useful for confirming the Windows GPU worker is connected and subscribed to the `gpu` queue.
+    """
+    try:
+        inspect = celery_app.control.inspect(timeout=1.0)
+        ping = inspect.ping() or {}
+        queues = inspect.active_queues() or {}
+        stats = inspect.stats() or {}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "ping": {}, "active_queues": {}, "stats": {}}
+    return {"ok": True, "ping": ping, "active_queues": queues, "stats": stats}

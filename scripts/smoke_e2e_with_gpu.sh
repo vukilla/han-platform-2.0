@@ -88,7 +88,7 @@ while true; do
     break
   fi
   if [[ "$STATUS" == "FAILED" ]]; then
-    echo "XGen failed: $(printf '%s' "$JOB_JSON" | python -c 'import json,sys; print(json.load(sys.stdin).get(\"error\"))')" >&2
+    echo "XGen failed: $(printf '%s' "$JOB_JSON" | json_get 'error')" >&2
     exit 1
   fi
   now_ts="$(python -c 'import time; print(int(time.time()))')"
@@ -99,7 +99,7 @@ while true; do
   sleep 1
 done
 
-DATASET_ID="$(printf '%s' "$JOB_JSON" | python -c 'import json,sys; d=json.load(sys.stdin); print((d.get(\"params_json\") or {}).get(\"dataset_id\",\"\"))')"
+DATASET_ID="$(printf '%s' "$JOB_JSON" | json_get 'params_json.dataset_id')"
 if [[ -z "$DATASET_ID" ]]; then
   echo "Failed to locate dataset_id in XGen job params_json" >&2
   exit 1
@@ -121,7 +121,7 @@ while true; do
     break
   fi
   if [[ "$STATUS" == "FAILED" ]]; then
-    echo "XMimic failed: $(printf '%s' "$JOB_JSON" | python -c 'import json,sys; print(json.load(sys.stdin).get(\"error\"))')" >&2
+    echo "XMimic failed: $(printf '%s' "$JOB_JSON" | json_get 'error')" >&2
     exit 1
   fi
   now_ts="$(python -c 'import time; print(int(time.time()))')"
@@ -134,11 +134,11 @@ while true; do
 done
 
 POLICIES_JSON="$(curl -sS "$API_URL/policies?xmimic_job_id=$XMIMIC_JOB_ID")"
-POLICY_ID="$(printf '%s' "$POLICIES_JSON" | python -c 'import json,sys; d=json.load(sys.stdin); print(d[0][\"id\"] if d else \"\")')"
-CHECKPOINT_URL="$(printf '%s' "$POLICIES_JSON" | python -c 'import json,sys; d=json.load(sys.stdin); print(d[0][\"checkpoint_uri\"] if d else \"\")')"
+POLICY_ID="$(printf '%s' "$POLICIES_JSON" | json_get '0.id')"
+CHECKPOINT_URL="$(printf '%s' "$POLICIES_JSON" | json_get '0.checkpoint_uri')"
 
 EVALS_JSON="$(curl -sS "$API_URL/eval?policy_id=$POLICY_ID")"
-EVAL_ID="$(printf '%s' "$EVALS_JSON" | python -c 'import json,sys; d=json.load(sys.stdin); print(d[0][\"id\"] if d else \"\")')"
+EVAL_ID="$(printf '%s' "$EVALS_JSON" | json_get '0.id')"
 
 cat <<EOF
 

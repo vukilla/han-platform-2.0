@@ -175,11 +175,12 @@ def _relative_vectors(body_pos: np.ndarray, object_pos: np.ndarray) -> np.ndarra
     if obj.ndim == 1:
         if obj.size != 3:
             raise ValueError(f"object_pos must be (3,), got {obj.shape}")
-        return obj.reshape((1, 3)) - body
+        # Paper definition: u^(k) = u^k - u^o (key body position minus object position).
+        return body - obj.reshape((1, 3))
     if obj.ndim != 2 or obj.shape[-1] != 3:
         raise ValueError(f"object_pos must be (T, 3) or (3,), got {obj.shape}")
     if body.ndim == 3 and body.shape[0] == obj.shape[0]:
-        return obj[:, None, :] - body
+        return body - obj[:, None, :]
     raise ValueError(f"Cannot broadcast body_pos {body.shape} with object_pos {obj.shape}")
 
 

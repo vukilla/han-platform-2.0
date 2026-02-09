@@ -28,6 +28,16 @@ Optional one-command smoke tests:
 /Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/smoke_e2e_with_gpu.sh
 ```
 
+Fastest “do it for me” launch:
+
+1. On Mac:
+
+```bash
+/Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/mac/run_full_e2e.sh
+```
+
+2. When it prints your Mac IP, run the printed Windows command on the GPU PC. The Mac script will automatically continue once the GPU worker is detected.
+
 ## 1) Web UI: Upload -> XGen -> Dataset
 
 1. Open `http://localhost:3000/auth`

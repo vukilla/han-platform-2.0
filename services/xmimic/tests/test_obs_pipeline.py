@@ -19,7 +19,7 @@ class TestObsConfigs(unittest.TestCase):
 
     def test_teacher_schema_matches_table_iv(self):
         robot = self._robot()
-        cfg = humanx_teacher_obs_config(robot, num_skills=5, history=4)
+        cfg = humanx_teacher_obs_config(robot, history=4)
         self.assertEqual(
             [f.name for f in cfg.fields],
             [
@@ -32,7 +32,6 @@ class TestObsConfigs(unittest.TestCase):
                 "ref_body_pos",
                 "delta_body_pos",
                 "object_pos",
-                "skill_label",
             ],
         )
         self.assertEqual(
@@ -40,7 +39,7 @@ class TestObsConfigs(unittest.TestCase):
             ["base_ang_vel", "gravity", "dof_pos", "dof_vel", "action"],
         )
         # dim: current + history stack of subset (Table IV "History Terms")
-        self.assertEqual(cfg.dim, 120)
+        self.assertEqual(cfg.dim, 115)
 
     def test_student_nep_schema_matches_table_iv(self):
         robot = self._robot()
@@ -66,7 +65,7 @@ class TestObsConfigs(unittest.TestCase):
 
     def test_pipeline_accepts_common_aliases(self):
         robot = self._robot()
-        cfg = humanx_teacher_obs_config(robot, num_skills=5, history=4)
+        cfg = humanx_teacher_obs_config(robot, history=4)
         pipe = ObservationPipeline(cfg)
         dof = len(robot.joint_names)
         key = len(robot.key_bodies)
@@ -80,7 +79,6 @@ class TestObsConfigs(unittest.TestCase):
             "ref_key_body_pos": np.zeros((key * 3,), dtype=np.float32),  # alias for ref_body_pos
             "delta_key_body_pos": np.zeros((key * 3,), dtype=np.float32),  # alias for delta_body_pos
             "object_pos": np.zeros((3,), dtype=np.float32),
-            "skill_label": np.zeros((5,), dtype=np.float32),
         }
         vec = None
         for _ in range(cfg.history):

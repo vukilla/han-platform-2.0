@@ -163,6 +163,8 @@ def default_obs_config() -> ObservationConfig:
 def humanx_teacher_obs_config(
     robot: RobotSpec,
     *,
+    # Table IV shows Skill Label for the student only. Keep this as an opt-in for experiments.
+    include_skill_label: bool = False,
     num_skills: int = 10,
     include_object_rot: bool = False,
     include_target_object_pos: bool = False,
@@ -174,7 +176,7 @@ def humanx_teacher_obs_config(
 
     This follows the intent of Table IV:
     - proprioception + history
-    - skill label
+    - per-skill teacher policy (no skill label in Table IV; optional here)
     - optional object state (privileged)
     - optional target object pose (for goal-conditioned tasks)
     - optional reference/key-body positions (privileged)
@@ -204,7 +206,8 @@ def humanx_teacher_obs_config(
     if include_target_object_rot:
         fields.append(ObsField("target_object_rot", 4))
 
-    fields.append(ObsField("skill_label", num_skills))
+    if include_skill_label:
+        fields.append(ObsField("skill_label", num_skills))
 
     history_fields = [
         ObsField("base_ang_vel", 3),

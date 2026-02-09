@@ -61,6 +61,11 @@ This will:
 
 You have two options.
 
+Option 0 (recommended): one-click (bootstrap + start detached):
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\one_click_gpu_worker.ps1 -MacIp <MAC_LAN_IP> -IsaacSimPath C:\isaacsim
+```
+
 Option A (recommended): pass the Mac IP and let the script set env vars:
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\windows\run_gpu_worker.ps1 -MacIp <MAC_LAN_IP>

@@ -18,8 +18,11 @@ Do these steps in order and summarize after each:
    - which Isaac Sim Windows download page to use
    - where to extract it (target: C:\\isaacsim)
    - what file(s) you expect to exist (isaac-sim.bat)
-3) Run `scripts\\windows\\bootstrap_isaaclab.ps1 -IsaacSimPath C:\\isaacsim`.
-4) Run `scripts\\windows\\run_gpu_worker.ps1 -MacIp <MAC_LAN_IP>` and confirm it can connect to Redis/MinIO on the Mac.
-   - Optional detached: `scripts\\windows\\start_gpu_worker_detached.ps1 -MacIp <MAC_LAN_IP>`
+3) Run the one-click worker script (bootstraps Isaac Lab if needed, then starts the worker detached):
+   - `scripts\\windows\\one_click_gpu_worker.ps1 -MacIp <MAC_LAN_IP> -IsaacSimPath C:\\isaacsim`
+4) If you want to run the steps manually instead:
+   - Bootstrap: `scripts\\windows\\bootstrap_isaaclab.ps1 -IsaacSimPath C:\\isaacsim`
+   - Start worker (foreground): `scripts\\windows\\run_gpu_worker.ps1 -MacIp <MAC_LAN_IP>`
+   - Start worker (detached): `scripts\\windows\\start_gpu_worker_detached.ps1 -MacIp <MAC_LAN_IP>`
 5) If any step fails, write a short diagnosis and the minimal next action.
 ```

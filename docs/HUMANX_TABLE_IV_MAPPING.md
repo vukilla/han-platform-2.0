@@ -44,7 +44,7 @@ Teacher (`pi_tea`) vs Student (`pi_stu`) parity, line-by-line:
 - `object_rot`: teacher optional (`*`), student optional (`*`)
 - `target_object_pos`: teacher optional (`*`), student optional (`*`)
 - `target_object_rot`: teacher optional (`*`), student optional (`*`)
-- `skill_label`: teacher yes, student yes
+- `skill_label`: teacher no (per-skill teacher policy), student yes
 - `history`: teacher yes, student yes (implemented via `history_fields` stacking, not a standalone scalar)
 
 ### History Terms
@@ -64,6 +64,7 @@ We encode the Table IV schemas as explicit builders:
 
 Expected behavior:
 - **Teacher** always includes `object_pos` (privileged state).
+- **Teacher** does **not** include `skill_label` in Table IV (one teacher per skill). This repo keeps an opt-in `include_skill_label=True` for experiments.
 - **Student NEP** includes no object observations.
 - **Student MoCap** includes `object_pos`, and can optionally include `object_rot` (Table IV marks it optional).
 
@@ -75,7 +76,7 @@ Dropout behavior:
 Exact ordering is enforced by unit tests (`services/xmimic/tests/test_obs_pipeline.py`).
 
 For `services/xmimic/configs/robot_spec.yaml` (DoF=24, key bodies=5), the observation dimensions are:
-- Teacher: `(135 + num_skills) + 78 * history` (+4 if `object_rot` is enabled; +3/+4 for target object pose)
+- Teacher: `135 + 78 * history` (+4 if `object_rot` is enabled; +3/+4 for target object pose)
 - Student NEP: `(78 + num_skills) + 78 * history`
 - Student MoCap: `(81 + num_skills) + 78 * history` (+4 if `object_rot` is enabled)
 
@@ -107,7 +108,7 @@ Table IV row -> reward key:
 Relative motion (paper Eq. 10) requires vectors `u_t` from key bodies to the object position.
 Implementation detail:
 - If `relative_pos` is not provided, we derive it automatically when `key_body_pos` (preferred) or `body_pos` and `object_pos` are present:
-  - `u_hat = object_pos - key_body_pos` (or `object_pos - body_pos` fallback)
+  - `u = key_body_pos - object_pos` (or `body_pos - object_pos` fallback)
   - `u_ref` computed from the corresponding reference signals.
 
 Error metric parity:
