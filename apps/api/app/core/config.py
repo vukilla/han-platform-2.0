@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
 
     s3_endpoint: str = "http://minio:9000"
+    # Endpoint used for presigned URLs handed to a browser/client.
+    # In docker-compose this should generally be a host-reachable address like http://localhost:9000.
+    s3_public_endpoint: str = "http://localhost:9000"
     s3_access_key: str = "minioadmin"
     s3_secret_key: str = "minioadmin"
     s3_bucket: str = "humanx-dev"

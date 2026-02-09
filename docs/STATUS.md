@@ -144,8 +144,9 @@
 - Added deployment runtime loop scaffold with 100Hz policy / 1000Hz PD (22.01).
 - Added MoCap dropout + transform scaffolding for runtime parity (22.02).
 - Added runtime safety scaffold (torque limits, joint limits, fall detect, watchdog) (22.03).
+- Platform plumbing: XGen jobs now create `datasets` + `dataset_clips` records and upload real artifacts (`.npz` + `dataset.zip`) to MinIO/S3, and dataset clip URIs are returned as presigned URLs (24.01).
+- Platform plumbing: XMimic jobs now register a checkpoint artifact and create `policies` + `eval_runs` records on completion (24.02).
 
 ## Open items needed
-- MAC_LAN_IP to configure GPU worker env and open firewall ports 6379/9000/9001
-- Isaac Sim (Windows) install + Isaac Lab bootstrap on the RTX 5090 PC.
-- Transfer GVHMR checkpoints to the RTX 5090 PC (if running GVHMR there).
+- Replace synthetic artifact generation with real XGen outputs (GVHMR/PhysHOI/Isaac Lab), including clip-aligned preview renders.
+- Wire XMimic training loop to Isaac Lab environments so checkpoints and eval metrics (SR/GSR/Eo/Eh) are non-synthetic.

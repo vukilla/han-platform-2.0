@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Optional
 import boto3
 from botocore.client import Config
@@ -6,11 +7,11 @@ from botocore.exceptions import ClientError
 from app.core.config import get_settings
 
 
-def get_s3_client():
+def get_s3_client(*, endpoint_url: str | None = None):
     settings = get_settings()
     return boto3.client(
         "s3",
-        endpoint_url=settings.s3_endpoint,
+        endpoint_url=endpoint_url or settings.s3_endpoint,
         aws_access_key_id=settings.s3_access_key,
         aws_secret_access_key=settings.s3_secret_key,
         region_name=settings.s3_region,
@@ -30,7 +31,7 @@ def ensure_bucket_exists():
 
 def create_presigned_put(key: str, content_type: Optional[str] = None, expires_in: int = 3600):
     settings = get_settings()
-    client = get_s3_client()
+    client = get_s3_client(endpoint_url=settings.s3_public_endpoint or settings.s3_endpoint)
     params = {"Bucket": settings.s3_bucket, "Key": key}
     if content_type:
         params["ContentType"] = content_type
@@ -39,7 +40,7 @@ def create_presigned_put(key: str, content_type: Optional[str] = None, expires_i
 
 def create_presigned_get(key: str, expires_in: int = 3600):
     settings = get_settings()
-    client = get_s3_client()
+    client = get_s3_client(endpoint_url=settings.s3_public_endpoint or settings.s3_endpoint)
     return client.generate_presigned_url(
         "get_object",
         Params={"Bucket": settings.s3_bucket, "Key": key},
@@ -52,3 +53,17 @@ def upload_text(key: str, text: str, content_type: str = "text/plain") -> str:
     client = get_s3_client()
     client.put_object(Bucket=settings.s3_bucket, Key=key, Body=text.encode("utf-8"), ContentType=content_type)
     return f"s3://{settings.s3_bucket}/{key}"
+
+
+def upload_bytes(key: str, data: bytes, content_type: str = "application/octet-stream") -> str:
+    """Upload raw bytes to object storage and return the storage key."""
+    settings = get_settings()
+    client = get_s3_client()
+    client.put_object(Bucket=settings.s3_bucket, Key=key, Body=data, ContentType=content_type)
+    return key
+
+
+def upload_file(key: str, path: str | Path, content_type: str = "application/octet-stream") -> str:
+    """Upload a file from disk to object storage and return the storage key."""
+    data = Path(path).read_bytes()
+    return upload_bytes(key, data, content_type=content_type)

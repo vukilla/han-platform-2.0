@@ -207,7 +207,20 @@ def list_datasets(project_id: UUID | None = None, db: Session = Depends(get_db))
 
 @router.get("/datasets/{dataset_id}/clips", response_model=list[schemas.DatasetClipOut])
 def get_dataset_clips(dataset_id: UUID, db: Session = Depends(get_db)):
-    return crud.list_dataset_clips(db, dataset_id)
+    clips = crud.list_dataset_clips(db, dataset_id)
+    out: list[schemas.DatasetClipOut] = []
+    for clip in clips:
+        out.append(
+            schemas.DatasetClipOut(
+                clip_id=clip.clip_id,
+                dataset_id=clip.dataset_id,
+                uri_npz=create_presigned_get(clip.uri_npz),
+                uri_preview_mp4=create_presigned_get(clip.uri_preview_mp4) if clip.uri_preview_mp4 else None,
+                augmentation_tags=clip.augmentation_tags,
+                stats_json=clip.stats_json,
+            )
+        )
+    return out
 
 
 class DownloadUrlResponse(BaseModel):

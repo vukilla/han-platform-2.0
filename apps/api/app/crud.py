@@ -204,6 +204,28 @@ def list_dataset_clips(db: Session, dataset_id):
     return db.query(models.DatasetClip).filter(models.DatasetClip.dataset_id == dataset_id).all()
 
 
+def create_dataset_clip(
+    db: Session,
+    dataset_id,
+    *,
+    uri_npz: str,
+    uri_preview_mp4: str | None = None,
+    augmentation_tags: list[str] | None = None,
+    stats_json: dict | None = None,
+):
+    clip = models.DatasetClip(
+        dataset_id=dataset_id,
+        uri_npz=uri_npz,
+        uri_preview_mp4=uri_preview_mp4,
+        augmentation_tags=augmentation_tags,
+        stats_json=stats_json,
+    )
+    db.add(clip)
+    db.commit()
+    db.refresh(clip)
+    return clip
+
+
 # XMimic Jobs
 
 def create_xmimic_job(db: Session, dataset_id, mode, params_json=None, idempotency_key=None):
