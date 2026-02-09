@@ -20,12 +20,6 @@ External repos + checkpoints are not committed. On the gaming PC:
 
 Codex agent instructions for the GPU PC are in `AGENTS.md`.
 
-## Pegasus (DFKI) GPU Cluster (Optional)
-If you want to avoid using a local gaming PC, you can run GPU workloads on Pegasus:
-- Setup: `docs/PEGASUS_SETUP.md`
-- First Codex prompt: `docs/FIRST_PROMPT_PEGASUS.md`
-- Slurm templates: `scripts/pegasus/`
-
 ## GitHub Notes
 - `.gitignore` excludes `external/`, `tmp/`, `.env`, venvs, node_modules, and large checkpoints.
 - Keep the HumanX PDF local (recommended path: `docs/references/HumanX.pdf`). Do not commit it.
