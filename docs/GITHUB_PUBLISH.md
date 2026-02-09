@@ -17,7 +17,14 @@ git remote add origin <YOUR_GITHUB_REMOTE_URL>
 git push -u origin main
 ```
 
+## Alternative (Recommended): gh Creates Repo For You
+
+If you have `gh` installed and authenticated:
+```bash
+gh auth login --hostname github.com --git-protocol https --web
+./scripts/gh_create_repo_and_push.sh han-platform-2.0 private
+```
+
 ## Notes
 - `external/`, `tmp/`, `.env`, venvs, and large checkpoints are excluded by `.gitignore`.
 - If you already have a git repo, skip `git init` and only do the remote/push steps.
-
