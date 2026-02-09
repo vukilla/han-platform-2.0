@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Runs the full golden path including a GPU-queue XMimic job.
+# Requires:
+# - Mac control-plane stack running (docker compose)
+# - Windows GPU worker running and connected to Mac Redis/MinIO/Postgres
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+API_URL="${API_URL:-http://localhost:8000}"
+WEB_URL="${WEB_URL:-http://localhost:3000}"
+EMAIL="${EMAIL:-smoke@example.com}"
+NAME="${NAME:-Smoke User}"
+MODE="${MODE:-nep}" # nep | mocap
+TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-900}"
+
+VIDEO_PATH="${1:-$ROOT_DIR/assets/sample_videos/cargo_pickup_01.mp4}"
+
+if [[ ! -f "$VIDEO_PATH" ]]; then
+  echo "Video not found: $VIDEO_PATH" >&2
+  exit 1
+fi
+
+json_get() {
+  local path="$1"
+  python -c 'import json,sys
+data=json.load(sys.stdin)
+cur=data
+for part in sys.argv[1].split("."):
+  if isinstance(cur, list):
+    cur = cur[int(part)]
+  else:
+    cur = cur[part]
+print(cur)
+' "$path"
+}
+
+echo "== Login =="
+LOGIN_JSON="$(curl -sS -X POST "$API_URL/auth/login" \
+  -H "Content-Type: application/json" \
+  -d "{\"email\":\"$EMAIL\",\"name\":\"$NAME\"}")"
+TOKEN="$(printf '%s' "$LOGIN_JSON" | json_get 'token')"
+AUTH_HEADER="Authorization: Bearer $TOKEN"
+
+echo "== Create project =="
+PROJECT_JSON="$(curl -sS -X POST "$API_URL/projects" \
+  -H "Content-Type: application/json" \
+  -H "$AUTH_HEADER" \
+  -d "{\"name\":\"Smoke Project\",\"description\":\"local e2e (gpu)\"}")"
+PROJECT_ID="$(printf '%s' "$PROJECT_JSON" | json_get 'id')"
+
+echo "== Create demo =="
+DEMO_JSON="$(curl -sS -X POST "$API_URL/demos" \
+  -H "Content-Type: application/json" \
+  -H "$AUTH_HEADER" \
+  -d "{\"project_id\":\"$PROJECT_ID\",\"robot_model\":\"unitree-g1\",\"object_id\":\"cargo_box\"}")"
+DEMO_ID="$(printf '%s' "$DEMO_JSON" | json_get 'id')"
+
+echo "== Get upload URL =="
+UPLOAD_JSON="$(curl -sS -X POST "$API_URL/demos/$DEMO_ID/upload-url")"
+UPLOAD_URL="$(printf '%s' "$UPLOAD_JSON" | json_get 'upload_url')"
+VIDEO_URI="$(printf '%s' "$UPLOAD_JSON" | json_get 'video_uri')"
+
+echo "== Upload video =="
+curl -sS -X PUT "$UPLOAD_URL" \
+  -H "Content-Type: video/mp4" \
+  --data-binary "@$VIDEO_PATH" >/dev/null
+
+echo "== Save annotations =="
+curl -sS -X POST "$API_URL/demos/$DEMO_ID/annotations" \
+  -H "Content-Type: application/json" \
+  -d '{"ts_contact_start":0.5,"ts_contact_end":8.0,"anchor_type":"palms_midpoint","key_bodies":["left_hand","right_hand"]}' >/dev/null
+
+echo "== Start XGen job (CPU queue) =="
+XGEN_JSON="$(curl -sS -X POST "$API_URL/demos/$DEMO_ID/xgen/run" \
+  -H "Content-Type: application/json" \
+  -H "$AUTH_HEADER" \
+  -d "{\"params_json\":{\"video_uri\":\"$VIDEO_URI\",\"placeholder_pose\":true,\"clip_count\":3,\"frames\":40,\"nq\":12,\"contact_dim\":4}}")"
+XGEN_JOB_ID="$(printf '%s' "$XGEN_JSON" | json_get 'id')"
+
+echo "== Poll XGen job =="
+start_ts="$(python -c 'import time; print(int(time.time()))')"
+while true; do
+  JOB_JSON="$(curl -sS "$API_URL/xgen/jobs/$XGEN_JOB_ID")"
+  STATUS="$(printf '%s' "$JOB_JSON" | json_get 'status')"
+  if [[ "$STATUS" == "COMPLETED" ]]; then
+    break
+  fi
+  if [[ "$STATUS" == "FAILED" ]]; then
+    echo "XGen failed: $(printf '%s' "$JOB_JSON" | python -c 'import json,sys; print(json.load(sys.stdin).get(\"error\"))')" >&2
+    exit 1
+  fi
+  now_ts="$(python -c 'import time; print(int(time.time()))')"
+  if (( now_ts - start_ts > TIMEOUT_SECONDS )); then
+    echo "Timed out waiting for XGen. Check: $WEB_URL/jobs/$XGEN_JOB_ID" >&2
+    exit 1
+  fi
+  sleep 1
+done
+
+DATASET_ID="$(printf '%s' "$JOB_JSON" | python -c 'import json,sys; d=json.load(sys.stdin); print((d.get(\"params_json\") or {}).get(\"dataset_id\",\"\"))')"
+if [[ -z "$DATASET_ID" ]]; then
+  echo "Failed to locate dataset_id in XGen job params_json" >&2
+  exit 1
+fi
+
+echo "== Start XMimic job (GPU queue) =="
+XMIMIC_JSON="$(curl -sS -X POST "$API_URL/datasets/$DATASET_ID/xmimic/run" \
+  -H "Content-Type: application/json" \
+  -H "$AUTH_HEADER" \
+  -d "{\"mode\":\"$MODE\",\"params_json\":{\"distillation\":\"teacher_student\"}}")"
+XMIMIC_JOB_ID="$(printf '%s' "$XMIMIC_JSON" | json_get 'id')"
+
+echo "== Poll XMimic job (requires Windows GPU worker) =="
+start_ts="$(python -c 'import time; print(int(time.time()))')"
+while true; do
+  JOB_JSON="$(curl -sS "$API_URL/xmimic/jobs/$XMIMIC_JOB_ID")"
+  STATUS="$(printf '%s' "$JOB_JSON" | json_get 'status')"
+  if [[ "$STATUS" == "COMPLETED" ]]; then
+    break
+  fi
+  if [[ "$STATUS" == "FAILED" ]]; then
+    echo "XMimic failed: $(printf '%s' "$JOB_JSON" | python -c 'import json,sys; print(json.load(sys.stdin).get(\"error\"))')" >&2
+    exit 1
+  fi
+  now_ts="$(python -c 'import time; print(int(time.time()))')"
+  if (( now_ts - start_ts > TIMEOUT_SECONDS )); then
+    echo "Timed out waiting for XMimic. Ensure the Windows GPU worker is running." >&2
+    echo "Check: $WEB_URL/xmimic/$XMIMIC_JOB_ID" >&2
+    exit 1
+  fi
+  sleep 2
+done
+
+POLICIES_JSON="$(curl -sS "$API_URL/policies?xmimic_job_id=$XMIMIC_JOB_ID")"
+POLICY_ID="$(printf '%s' "$POLICIES_JSON" | python -c 'import json,sys; d=json.load(sys.stdin); print(d[0][\"id\"] if d else \"\")')"
+CHECKPOINT_URL="$(printf '%s' "$POLICIES_JSON" | python -c 'import json,sys; d=json.load(sys.stdin); print(d[0][\"checkpoint_uri\"] if d else \"\")')"
+
+EVALS_JSON="$(curl -sS "$API_URL/eval?policy_id=$POLICY_ID")"
+EVAL_ID="$(printf '%s' "$EVALS_JSON" | python -c 'import json,sys; d=json.load(sys.stdin); print(d[0][\"id\"] if d else \"\")')"
+
+cat <<EOF
+
+OK (GPU end-to-end)
+- XGen job:           $WEB_URL/jobs/$XGEN_JOB_ID
+- Dataset:            $WEB_URL/datasets/$DATASET_ID
+- XMimic job:         $WEB_URL/xmimic/$XMIMIC_JOB_ID
+- Policies:           $WEB_URL/policies
+- Eval report:        $WEB_URL/eval/$EVAL_ID
+- Checkpoint download: $CHECKPOINT_URL
+
+If XMimic timed out:
+- Start the Windows GPU worker:
+  scripts\\windows\\start_gpu_worker_detached.ps1 -MacIp <MAC_LAN_IP>
+EOF

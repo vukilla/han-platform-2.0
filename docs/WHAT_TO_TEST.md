@@ -18,6 +18,16 @@ Sanity checks:
 1. Confirm `status` is `ok` and `db/redis/s3` are `true`
 1. Open `http://localhost:3000`
 
+Optional one-command smoke tests:
+
+```bash
+# CPU-only golden path (upload -> XGen -> dataset)
+/Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/smoke_local_e2e.sh
+
+# Full golden path including GPU-queue XMimic (requires Windows GPU worker running)
+/Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/smoke_e2e_with_gpu.sh
+```
+
 ## 1) Web UI: Upload -> XGen -> Dataset
 
 1. Open `http://localhost:3000/auth`
@@ -76,4 +86,3 @@ What “success” means here (current state):
   - Username: `minioadmin`
   - Password: `minioadmin`
 - XGen/XMimic logs are exposed as presigned HTTP URLs from the job pages.
-
