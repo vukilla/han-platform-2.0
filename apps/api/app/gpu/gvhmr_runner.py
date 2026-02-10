@@ -166,10 +166,9 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
     left = in-camera mesh overlay, right = global mesh with a ground plane.
 
     In this platform we run GVHMR with `--skip_render` (PyTorch3D renderer/structures is
-    frequently unavailable on Windows). This function generates a *skeleton-based* preview
-    with the same layout:
-    left = 2D projection of recovered 3D joints overlaid on the input video
-    right = global-view skeleton with a perspective ground grid
+    frequently unavailable on Windows). The Web UI already shows the original video in the
+    left panel, so this function generates the *right panel only*:
+    global-view skeleton with a perspective checkered ground plane.
     """
     import math
 
@@ -183,7 +182,7 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
         sys.path.insert(0, str(gvhmr_root))
 
     from hmr4d.utils.body_model.smplx_lite import SmplxLiteCoco17, SmplxLiteSmplN24
-    from hmr4d.utils.geo.hmr_cam import create_camera_sensor, estimate_K
+    from hmr4d.utils.geo.hmr_cam import create_camera_sensor
     from hmr4d.utils.geo_transform import apply_T_on_points, compute_T_ayfz2ay
 
     def _as_tensor(x) -> torch.Tensor:
@@ -192,13 +191,9 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
         return torch.from_numpy(np.asarray(x))
 
     pred = torch.load(results_path, map_location="cpu")
-    smpl_incam = pred.get("smpl_params_incam") or {}
     smpl_global = pred.get("smpl_params_global") or {}
     if not smpl_global:
         raise ValueError("hmr4d_results.pt missing smpl_params_global")
-    if not smpl_incam:
-        # Some outputs omit incam params; use global as best-effort.
-        smpl_incam = smpl_global
 
     # Determine the frame count from global body_pose.
     body_pose_global = _as_tensor(smpl_global.get("body_pose")).float()
@@ -264,18 +259,12 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
     h_in = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
     if w_in <= 0 or h_in <= 0:
         w_in, h_in = 640, 360
+    cap.release()
 
     panel_w = int(w_in)
     panel_h = int(h_in)
-    out_w = int(panel_w * 2)
+    out_w = int(panel_w)
     out_h = int(panel_h)
-
-    # In-camera intrinsics for projection.
-    K_fullimg = pred.get("K_fullimg", None)
-    if K_fullimg is None:
-        K_incam = estimate_K(panel_w, panel_h)
-    else:
-        K_incam = _as_tensor(K_fullimg[0] if hasattr(K_fullimg, "__len__") else K_fullimg).float()
 
     # Global panel intrinsics (match GVHMR demo: render as a 24mm lens).
     _, _, K_global = create_camera_sensor(panel_w, panel_h, 24)
@@ -311,22 +300,6 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
         uvw = torch.matmul(norm, K.T)
         return uvw[..., :2]
 
-    def _yflip_if_better(points: torch.Tensor, K: torch.Tensor, w: int, h: int) -> torch.Tensor:
-        # Choose the projection with more joints inside the image.
-        with torch.no_grad():
-            uv0 = _project_pinhole(points, K)
-            points1 = points.clone()
-            points1[..., 1] *= -1.0
-            uv1 = _project_pinhole(points1, K)
-
-            def _score(uv: torch.Tensor) -> float:
-                u = uv[..., 0]
-                v = uv[..., 1]
-                ok = torch.isfinite(u) & torch.isfinite(v) & (u >= 0) & (u < float(w)) & (v >= 0) & (v < float(h))
-                return float(ok.float().mean().item())
-
-            return points1 if _score(uv1) > _score(uv0) else points
-
     def _draw_skeleton(
         img: np.ndarray,
         uv: np.ndarray,
@@ -348,15 +321,11 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
     model_coco = SmplxLiteCoco17().to(device)
     model_smpl24 = SmplxLiteSmplN24().to(device)
 
-    bp_i, be_i, go_i, tr_i = _extract_params(smpl_incam, frame_ids)
     bp_g, be_g, go_g, tr_g = _extract_params(smpl_global, frame_ids)
 
     with torch.no_grad():
-        joints_incam = model_coco(bp_i.to(device), be_i.to(device), go_i.to(device), tr_i.to(device)).squeeze(0)
         joints_global_coco = model_coco(bp_g.to(device), be_g.to(device), go_g.to(device), tr_g.to(device)).squeeze(0)
         joints_global_smpl24 = model_smpl24(bp_g.to(device), be_g.to(device), go_g.to(device), tr_g.to(device)).squeeze(0)
-
-    joints_incam = _yflip_if_better(joints_incam, K_incam.to(joints_incam), panel_w, panel_h)
 
     # === Normalize + face-Z transform for global view (approx GVHMR `move_to_start_point_face_z`) ===
     min_y = joints_global_smpl24[..., 1].min()
@@ -418,7 +387,29 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
     grid_steps = 10
     grid_step = grid_scale / float(grid_steps)
 
-    # === Render merged preview ===
+    # Precompute the checkerboard quads once (static camera + static ground plane).
+    checker_quads: list[tuple[np.ndarray, tuple[int, int, int]]] = []
+    checker_a = (200, 205, 208)
+    checker_b = (160, 165, 168)
+    for ix in range(grid_steps):
+        for iz in range(grid_steps):
+            x0 = cx - grid_half + float(ix) * grid_step
+            x1 = x0 + grid_step
+            z0 = cz - grid_half + float(iz) * grid_step
+            z1 = z0 + grid_step
+            corners = torch.tensor(
+                [[x0, 0.0, z0], [x1, 0.0, z0], [x1, 0.0, z1], [x0, 0.0, z1]],
+                dtype=torch.float32,
+            )
+            uv = _project_global(corners)
+            uv_np = uv.detach().cpu().numpy()
+            if not np.all(np.isfinite(uv_np)):
+                continue
+            quad = uv_np.astype(np.int32)
+            color = checker_a if (ix + iz) % 2 == 0 else checker_b
+            checker_quads.append((quad, color))
+
+    # === Render global preview ===
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out_mp4_path.parent.mkdir(parents=True, exist_ok=True)
     writer = cv2.VideoWriter(str(out_mp4_path), fourcc, fps_out, (out_w, out_h))
@@ -426,67 +417,16 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
         raise RuntimeError(f"Unable to create VideoWriter for: {out_mp4_path}")
 
     try:
-        frame_idx = 0
         for jidx in range(int(frame_ids.shape[0])):
-            ok, frame = cap.read()
-            if not ok:
-                break
-            # We asked OpenCV for all frames; only keep ones matching our stride.
-            if frame_idx % stride != 0:
-                frame_idx += 1
-                continue
-            frame_idx += 1
+            img = np.full((panel_h, panel_w, 3), 255, dtype=np.uint8)
+            for quad, color in checker_quads:
+                cv2.fillConvexPoly(img, quad, color, lineType=cv2.LINE_AA)
 
-            # Left panel: original frame with projected joints overlay.
-            left = frame.copy()
-            uv_in = _project_pinhole(joints_incam[jidx].detach().cpu(), K_incam).numpy()
-            _draw_skeleton(left, uv_in, color=(70, 255, 120), thickness=3, radius=4)
-            cv2.putText(
-                left,
-                "GVHMR incam (skeleton preview)",
-                (12, 28),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (235, 235, 235),
-                2,
-                cv2.LINE_AA,
-            )
+            uv_glob = _project_global(joints_global_coco[jidx]).detach().cpu().numpy()
+            _draw_skeleton(img, uv_glob, color=(150, 150, 150), thickness=3, radius=4)
 
-            # Right panel: global-view skeleton + ground grid.
-            right = np.full((panel_h, panel_w, 3), 255, dtype=np.uint8)
-            grid_color = (210, 210, 210)
-            for i in range(grid_steps + 1):
-                x = cx - grid_half + float(i) * grid_step
-                p0 = torch.tensor([x, 0.0, cz - grid_half], dtype=torch.float32)
-                p1 = torch.tensor([x, 0.0, cz + grid_half], dtype=torch.float32)
-                uv0 = _project_global(p0).numpy().astype(np.int32)
-                uv1 = _project_global(p1).numpy().astype(np.int32)
-                cv2.line(right, (int(uv0[0]), int(uv0[1])), (int(uv1[0]), int(uv1[1])), grid_color, 1, cv2.LINE_AA)
-
-                z = cz - grid_half + float(i) * grid_step
-                p0 = torch.tensor([cx - grid_half, 0.0, z], dtype=torch.float32)
-                p1 = torch.tensor([cx + grid_half, 0.0, z], dtype=torch.float32)
-                uv0 = _project_global(p0).numpy().astype(np.int32)
-                uv1 = _project_global(p1).numpy().astype(np.int32)
-                cv2.line(right, (int(uv0[0]), int(uv0[1])), (int(uv1[0]), int(uv1[1])), grid_color, 1, cv2.LINE_AA)
-
-            uv_glob = _project_global(joints_global_coco[jidx]).numpy()
-            _draw_skeleton(right, uv_glob, color=(120, 120, 120), thickness=3, radius=4)
-            cv2.putText(
-                right,
-                "GVHMR global (skeleton preview)",
-                (12, 28),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (35, 35, 35),
-                2,
-                cv2.LINE_AA,
-            )
-
-            merged = np.concatenate([left, right], axis=1)
-            writer.write(merged)
+            writer.write(img)
     finally:
-        cap.release()
         writer.release()
 
     return {
@@ -496,7 +436,7 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
         "fps_out": fps_out,
         "stride": int(stride),
         "frames_out": int(frame_ids.shape[0]),
-        "layout": "incam_global_horiz_skeleton",
+        "layout": "global_skeleton",
     }
 
 
