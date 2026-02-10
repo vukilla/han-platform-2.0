@@ -15,6 +15,7 @@ rich
 tqdm
 einops
 timm==0.9.12
+yacs
 
 opencv-python
 ffmpeg-python
