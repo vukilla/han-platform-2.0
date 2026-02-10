@@ -75,6 +75,28 @@ export async function getDemoUploadUrl(demoId: string) {
   });
 }
 
+export async function uploadDemoVideo(demoId: string, file: File) {
+  const token = getToken();
+  const headers = new Headers();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const form = new FormData();
+  form.append("file", file);
+
+  const response = await fetch(`${API_URL}/demos/${demoId}/upload`, {
+    method: "POST",
+    headers,
+    body: form,
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || response.statusText);
+  }
+  return response.json() as Promise<DemoOut>;
+}
+
 export async function annotateDemo(
   demoId: string,
   payload: {

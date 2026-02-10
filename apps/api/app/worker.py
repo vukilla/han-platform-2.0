@@ -361,6 +361,46 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
     local_video = tmp_root / "input.mp4"
     download_file(video_uri, local_video)
 
+    # Optional: trim long videos to speed up interactive demos.
+    # This trades completeness for responsiveness and is recommended for "golden path" UX.
+    max_seconds = params.get("gvhmr_max_seconds", None)
+    if max_seconds is None:
+        max_seconds = params.get("pose_max_seconds", None)
+    try:
+        max_seconds_val = float(max_seconds) if max_seconds is not None else None
+    except Exception:
+        max_seconds_val = None
+    if max_seconds_val and max_seconds_val > 0:
+        try:
+            import cv2
+
+            cap = cv2.VideoCapture(str(local_video))
+            fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+            if w > 0 and h > 0 and cap.isOpened():
+                trimmed_video = tmp_root / "input_trimmed.mp4"
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                writer = cv2.VideoWriter(str(trimmed_video), fourcc, fps, (w, h))
+                if writer.isOpened():
+                    max_frames = max(1, int(round(fps * float(max_seconds_val))))
+                    written = 0
+                    while written < max_frames:
+                        ok_frame, frame = cap.read()
+                        if not ok_frame:
+                            break
+                        writer.write(frame)
+                        written += 1
+                    writer.release()
+                    if trimmed_video.exists() and trimmed_video.stat().st_size > 0 and written > 0:
+                        local_video = trimmed_video
+                        params["gvhmr_trimmed_seconds"] = float(max_seconds_val)
+                        params["gvhmr_trimmed_frames"] = int(written)
+            cap.release()
+        except Exception:
+            # Best-effort: if trimming fails, run GVHMR on the full video.
+            pass
+
     out_dir = tmp_root / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
 

@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { annotateDemo, createDemo, createProject, getDemoUploadUrl, runXgen } from "@/lib/api";
+import { annotateDemo, createDemo, createProject, runXgen, uploadDemoVideo } from "@/lib/api";
 
 export default function NewDemoPage() {
   const router = useRouter();
@@ -35,25 +35,20 @@ export default function NewDemoPage() {
   const [jobId, setJobId] = useState<string | null>(null);
 
   useEffect(() => {
+    let timer: NodeJS.Timeout | null = null;
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    fetch(`${apiUrl}/ops/workers?timeout=1.0`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => setGpuReady(Boolean(data?.has_gpu_queue)))
-      .catch(() => setGpuReady(null));
+    const poll = () => {
+      fetch(`${apiUrl}/ops/workers?timeout=1.0`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => setGpuReady(Boolean(data?.has_gpu_queue)))
+        .catch(() => setGpuReady(null));
+    };
+    poll();
+    timer = setInterval(poll, 3000);
+    return () => {
+      if (timer) clearInterval(timer);
+    };
   }, []);
-
-  async function uploadToPresignedUrl(uploadUrl: string, uploadFile: File) {
-    const response = await fetch(uploadUrl, {
-      method: "PUT",
-      body: uploadFile,
-      headers: {
-        "Content-Type": uploadFile.type || "video/mp4",
-      },
-    });
-    if (!response.ok) {
-      throw new Error("Upload failed");
-    }
-  }
 
   async function handleRun() {
     setError(null);
@@ -70,11 +65,8 @@ export default function NewDemoPage() {
       setStatus("Creating demo record...");
       const demo = await createDemo(project.id, robotModel, objectId);
 
-      setStatus("Requesting upload URL...");
-      const upload = await getDemoUploadUrl(demo.id);
-
       setStatus("Uploading video...");
-      await uploadToPresignedUrl(upload.upload_url, file);
+      await uploadDemoVideo(demo.id, file);
 
       setStatus("Saving annotations...");
       await annotateDemo(demo.id, {
@@ -86,7 +78,6 @@ export default function NewDemoPage() {
 
       setStatus("Starting XGen job...");
       const xgenParams: Record<string, unknown> = {
-        video_uri: upload.video_uri,
         object_id: objectId,
         object_pose: {
           x: Number(objectPose.x),

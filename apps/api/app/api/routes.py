@@ -1,7 +1,7 @@
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 from pydantic import BaseModel
 import json
 import redis
@@ -163,6 +163,41 @@ def create_demo_upload_url(demo_id: UUID, db: Session = Depends(get_db)):
     db.add(demo)
     db.commit()
     return UploadUrlResponse(upload_url=url, video_uri=key)
+
+
+@router.post("/demos/{demo_id}/upload", response_model=schemas.DemoOut)
+def upload_demo_video(demo_id: UUID, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Upload a demo video via the API (browser-friendly).
+
+    Presigned PUT uploads to object storage require bucket CORS for browsers.
+    This endpoint keeps the MVP UX simple: the Web UI uploads to the API and the
+    API streams the file to object storage.
+    """
+    demo = crud.get_demo(db, demo_id)
+    if not demo:
+        raise HTTPException(status_code=404, detail="Demo not found")
+
+    key = f"demos/{demo_id}/raw.mp4"
+    content_type = file.content_type or "video/mp4"
+
+    client = get_s3_client()
+    # Stream upload to object storage to avoid loading large videos into memory.
+    client.upload_fileobj(
+        Fileobj=file.file,
+        Bucket=settings.s3_bucket,
+        Key=key,
+        ExtraArgs={"ContentType": content_type},
+    )
+
+    demo.video_uri = key
+    demo.status = "UPLOADED"
+    db.add(demo)
+    db.commit()
+    db.refresh(demo)
+
+    out = schemas.DemoOut.model_validate(demo)
+    out.video_uri = _presign_maybe(out.video_uri)
+    return out
 
 
 @router.post("/demos/{demo_id}/annotations", response_model=schemas.DemoAnnotationOut)

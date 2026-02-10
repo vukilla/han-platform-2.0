@@ -101,11 +101,19 @@ export default function JobProgressPage() {
     : {};
 
   useEffect(() => {
+    let timer: NodeJS.Timeout | null = null;
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    fetch(`${apiUrl}/ops/workers?timeout=1.0`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => setGpuReady(Boolean(data?.has_gpu_queue)))
-      .catch(() => setGpuReady(null));
+    const poll = () => {
+      fetch(`${apiUrl}/ops/workers?timeout=1.0`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => setGpuReady(Boolean(data?.has_gpu_queue)))
+        .catch(() => setGpuReady(null));
+    };
+    poll();
+    timer = setInterval(poll, 3000);
+    return () => {
+      if (timer) clearInterval(timer);
+    };
   }, []);
 
   const startTraining = useCallback(async (mode: "nep" | "mocap", backend: "synthetic" | "isaaclab_teacher_ppo") => {
