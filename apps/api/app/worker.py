@@ -175,6 +175,116 @@ def _ensure_dataset_for_xgen_job(db, job: models.XGenJob) -> models.Dataset:
     return dataset
 
 
+def _run_isaaclab_teacher_ppo_subprocess(*, job_id: str, params: dict, log_lines: list[str]) -> dict:
+    """Run Isaac Lab teacher PPO in a dedicated subprocess.
+
+    Why:
+    - Isaac Sim/Kit lifecycle is fragile on Windows. Closing a SimulationApp can terminate the
+      entire process. If PPO runs inside the Celery worker process, it can kill the worker and
+      leave jobs stuck in Redis as "delivered but unacked".
+    - Running PPO in a subprocess isolates Kit shutdown from Celery.
+    """
+    if os.name != "nt":
+        raise RuntimeError("isaaclab_teacher_ppo backend is only supported on Windows GPU workers.")
+
+    repo_root = Path(__file__).resolve().parents[3]
+    api_dir = repo_root / "apps" / "api"
+    isaaclab_bat = repo_root / "external" / "isaaclab" / "isaaclab.bat"
+    if not isaaclab_bat.exists():
+        raise FileNotFoundError(
+            f"Isaac Lab not found at {isaaclab_bat}. Run scripts\\\\windows\\\\bootstrap_isaaclab.ps1 on the GPU PC."
+        )
+
+    tmp_out = Path(tempfile.mkdtemp(prefix=f"isaaclab_ppo_{job_id}_"))
+    stdout_path = tmp_out / "isaaclab_ppo.stdout.log"
+    stderr_path = tmp_out / "isaaclab_ppo.stderr.log"
+
+    def _get(name: str, default):
+        v = params.get(name, default)
+        return default if v is None else v
+
+    cmd = [
+        "cmd.exe",
+        "/c",
+        str(isaaclab_bat),
+        "-p",
+        "-m",
+        "app.gpu.isaaclab_teacher_ppo_cli",
+        "--out-dir",
+        str(tmp_out),
+        "--task",
+        str(_get("isaaclab_task", "cargo_pickup_franka")),
+        "--device",
+        str(_get("device", "cuda:0")),
+        "--num-envs",
+        str(int(_get("num_envs", 64))),
+        "--seed",
+        str(int(_get("seed", 0))),
+        "--rollout-steps",
+        str(int(_get("rollout_steps", 128))),
+        "--updates",
+        str(int(_get("updates", 10))),
+        "--gamma",
+        str(float(_get("gamma", 0.99))),
+        "--gae-lambda",
+        str(float(_get("gae_lambda", 0.95))),
+        "--clip-range",
+        str(float(_get("clip_range", 0.2))),
+        "--lr",
+        str(float(_get("lr", 3e-4))),
+        "--epochs",
+        str(int(_get("epochs", 4))),
+    ]
+
+    log_lines.append(f"{datetime.utcnow().isoformat()}Z [isaaclab] starting subprocess")
+    with stdout_path.open("w", encoding="utf-8") as out_handle, stderr_path.open("w", encoding="utf-8") as err_handle:
+        proc = subprocess.run(cmd, cwd=str(api_dir), stdout=out_handle, stderr=err_handle, check=False)
+
+    result_path = tmp_out / "result.json"
+    payload = {}
+    if result_path.exists():
+        try:
+            payload = json.loads(result_path.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
+
+    # Always try to upload logs to help debugging from the web UI.
+    try:
+        stdout_key = f"policies/{job_id}/isaaclab_teacher_ppo.stdout.log"
+        stderr_key = f"policies/{job_id}/isaaclab_teacher_ppo.stderr.log"
+        upload_file(stdout_key, stdout_path, content_type="text/plain")
+        upload_file(stderr_key, stderr_path, content_type="text/plain")
+    except Exception:
+        stdout_key = None
+        stderr_key = None
+
+    if proc.returncode != 0 or not payload.get("ok"):
+        err = str(payload.get("error") or f"isaaclab teacher PPO failed (exit={proc.returncode})")
+        if stdout_key or stderr_key:
+            log_lines.append(
+                f"{datetime.utcnow().isoformat()}Z [isaaclab] subprocess_failed logs stdout={stdout_key} stderr={stderr_key}"
+            )
+        raise RuntimeError(err)
+
+    metrics = dict(payload.get("metrics") or {})
+    metrics["subprocess_out_dir"] = str(tmp_out)
+    if stdout_key:
+        metrics["stdout_log_uri"] = stdout_key
+    if stderr_key:
+        metrics["stderr_log_uri"] = stderr_key
+    try:
+        train_log = tmp_out / "train.log"
+        if train_log.exists():
+            train_key = f"policies/{job_id}/isaaclab_teacher_ppo.train.log"
+            upload_file(train_key, train_log, content_type="text/plain")
+            metrics["train_log_uri"] = train_key
+    except Exception:
+        pass
+
+    log_lines.append(f"{datetime.utcnow().isoformat()}Z [isaaclab] subprocess_ok")
+    return metrics
+
+
 def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params: dict) -> dict:
     """Run GVHMR pose estimation on the local machine and upload artifacts to object storage.
 
@@ -493,34 +603,11 @@ def run_xmimic_job(self, job_id: str):
             sleep(0.5)
             if backend == "isaaclab_teacher_ppo" and stage == "TRAIN_TEACHER":
                 log_lines.append(f"{datetime.utcnow().isoformat()}Z backend=isaaclab_teacher_ppo starting")
-                try:
-                    from app.gpu.isaaclab_teacher_ppo import IsaacLabTeacherPPOConfig, train_teacher_ppo
-                except Exception as exc:
-                    raise RuntimeError(
-                        "Isaac Lab training backend requested but imports failed. "
-                        "Ensure the Windows GPU worker is bootstrapped with Isaac Sim + Isaac Lab and is running Celery "
-                        "from Isaac Sim python."
-                    ) from exc
-
-                tmp_out = Path(tempfile.mkdtemp(prefix=f"xmimic_{job_id}_"))
-                cfg = IsaacLabTeacherPPOConfig(
-                    task=str(params.get("isaaclab_task", "cargo_pickup_franka") or "cargo_pickup_franka"),
-                    device=str(params.get("device", "cuda:0") or "cuda:0"),
-                    num_envs=int(params.get("num_envs", 64)),
-                    seed=int(params.get("seed", 0)),
-                    rollout_steps=int(params.get("rollout_steps", 128)),
-                    updates=int(params.get("updates", 10)),
-                    gamma=float(params.get("gamma", 0.99)),
-                    gae_lambda=float(params.get("gae_lambda", 0.95)),
-                    clip_range=float(params.get("clip_range", 0.2)),
-                    lr=float(params.get("lr", 3e-4)),
-                    epochs=int(params.get("epochs", 4)),
+                isaaclab_metrics = _run_isaaclab_teacher_ppo_subprocess(
+                    job_id=job_id,
+                    params=params,
+                    log_lines=log_lines,
                 )
-
-                def _log_cb(msg: str) -> None:
-                    log_lines.append(f"{datetime.utcnow().isoformat()}Z {msg}")
-
-                isaaclab_metrics = train_teacher_ppo(cfg, out_dir=tmp_out, log_cb=_log_cb)
                 params["backend"] = backend
                 params["isaaclab_metrics"] = isaaclab_metrics
                 job.params_json = params
