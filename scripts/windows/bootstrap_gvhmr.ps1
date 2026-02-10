@@ -6,7 +6,12 @@ param(
   # - gvhmr_siga24_release.ckpt (HuggingFace)
   # - yolov8x.pt (Ultralytics release)
   # The remaining checkpoints are still required but may need manual download due to Google Drive UX/licensing.
-  [switch]$DownloadLightCheckpoints
+  [switch]$DownloadLightCheckpoints,
+  # Best-effort attempt to download the remaining heavy checkpoints from the public Google Drive folder.
+  #
+  # NOTE: This may still fail if Google requires interactive sign-in or license acknowledgement.
+  # If it fails, use the manual steps described at the end of this script.
+  [switch]$TryDownloadHeavyCheckpoints
 )
 
 $ErrorActionPreference = "Stop"
@@ -147,6 +152,25 @@ if ($DownloadLightCheckpoints) {
   }
 }
 
+if ($TryDownloadHeavyCheckpoints) {
+  Write-Host ""
+  Write-Host "-- Heavy checkpoint download (best-effort) --" -ForegroundColor Cyan
+  Write-Host "Attempting to download remaining checkpoints from GVHMR's Google Drive folder." -ForegroundColor Cyan
+  Write-Host "If this fails, download manually and place files under:" -ForegroundColor Yellow
+  Write-Host "  $stagedCkptRoot" -ForegroundColor Yellow
+  Write-Host ""
+
+  $folderUrl = "https://drive.google.com/drive/folders/1eebJ13FUEXrKBawHpJroW0sNSxLjh9xD"
+  try {
+    Invoke-CmdChecked "`"$isaacLabBat`" -p -m pip install gdown==5.2.0"
+  } catch {
+    # Retry without pin.
+    Invoke-CmdChecked "`"$isaacLabBat`" -p -m pip install gdown"
+  }
+  # Download into the staged checkpoint root.
+  Invoke-CmdChecked "`"$isaacLabBat`" -p -m gdown --folder `"$folderUrl`" --output `"$stagedCkptRoot`""
+}
+
 Write-Host ""
 Write-Host "Remaining required checkpoint files (manual download may be needed):" -ForegroundColor Yellow
 Write-Host "  - dpvo\\dpvo.pth"
@@ -155,4 +179,3 @@ Write-Host "  - hmr2\\epoch=10-step=25000.ckpt"
 Write-Host ""
 Write-Host "Once checkpoints are in place, run the real smoke test from the Mac:" -ForegroundColor Green
 Write-Host "  ./scripts/smoke_e2e_with_gpu_real.sh"
-

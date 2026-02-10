@@ -27,6 +27,8 @@ This repo supports running GVHMR on the **Windows GPU worker** (Isaac Sim + Isaa
    - `scripts\\windows\\bootstrap_gvhmr.ps1`
    - Optional: download the two direct-link checkpoints:
      - `scripts\\windows\\bootstrap_gvhmr.ps1 -DownloadLightCheckpoints`
+   - Optional: best-effort download of the remaining checkpoints from GVHMR's public Google Drive folder:
+     - `scripts\\windows\\bootstrap_gvhmr.ps1 -TryDownloadHeavyCheckpoints`
 3. Manually place the remaining checkpoints under:
    - `external\\humanoid-projects\\GVHMR\\inputs\\checkpoints\\`
 

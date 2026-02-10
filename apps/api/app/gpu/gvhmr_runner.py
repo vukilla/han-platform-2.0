@@ -26,7 +26,7 @@ def _resolve_heavy_checkpoints_root() -> Path:
     return _repo_root() / "external" / "humanoid-projects" / "GVHMR" / "inputs" / "checkpoints"
 
 
-def _ensure_checkpoints(gvhmr_root: Path) -> None:
+def _ensure_checkpoints(gvhmr_root: Path, *, require_dpvo: bool) -> None:
     """Ensure `external/gvhmr/inputs/checkpoints` exists by linking staged checkpoints.
 
     GVHMR expects checkpoints under `<gvhmr_root>/inputs/checkpoints`. We stage large files under:
@@ -54,14 +54,18 @@ def _ensure_checkpoints(gvhmr_root: Path) -> None:
     except OSError:
         # Symlinks are often unavailable on Windows without Developer Mode or Administrator privileges.
         # Fall back to copying the required checkpoints. This is slower but robust.
-        expected.mkdir(parents=True, exist_ok=True)
-        for rel in (
+        required_files = [
             Path("gvhmr") / "gvhmr_siga24_release.ckpt",
-            Path("dpvo") / "dpvo.pth",
             Path("vitpose") / "vitpose-h-multi-coco.pth",
             Path("hmr2") / "epoch=10-step=25000.ckpt",
             Path("yolo") / "yolov8x.pt",
-        ):
+        ]
+        # DPVO is optional in GVHMR. Only require it when explicitly enabled.
+        if require_dpvo:
+            required_files.insert(1, Path("dpvo") / "dpvo.pth")
+
+        expected.mkdir(parents=True, exist_ok=True)
+        for rel in required_files:
             src = heavy / rel
             dst = expected / rel
             if dst.exists():
@@ -98,7 +102,7 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
             "GVHMR repo not found. Clone into external/gvhmr or set GVHMR_ROOT.\n"
             f"Expected: {gvhmr_root}"
         )
-    _ensure_checkpoints(gvhmr_root)
+    _ensure_checkpoints(gvhmr_root, require_dpvo=bool(use_dpvo))
 
     output_dir.mkdir(parents=True, exist_ok=True)
     output_root = output_dir / "gvhmr"

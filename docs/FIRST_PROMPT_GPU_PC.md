@@ -25,6 +25,8 @@ Do these steps in order and summarize after each:
      - `scripts\\windows\\one_click_gpu_worker_real.ps1 -MacIp <MAC_LAN_IP> -IsaacSimPath C:\\isaacsim -SetupGVHMR`
    - Optional: download the two direct-link checkpoints (GVHMR main ckpt + YOLO):
      - `scripts\\windows\\one_click_gpu_worker_real.ps1 -MacIp <MAC_LAN_IP> -IsaacSimPath C:\\isaacsim -SetupGVHMR -DownloadLightCheckpoints`
+   - Optional: best-effort download of the remaining heavy checkpoints from GVHMR's public Google Drive folder:
+     - `scripts\\windows\\one_click_gpu_worker_real.ps1 -MacIp <MAC_LAN_IP> -IsaacSimPath C:\\isaacsim -SetupGVHMR -TryDownloadHeavyCheckpoints`
    - Then manually place remaining GVHMR checkpoints under:
      - `external\\humanoid-projects\\GVHMR\\inputs\\checkpoints\\{dpvo,vitpose,hmr2}\\...`
 4) If you want to run the steps manually instead:

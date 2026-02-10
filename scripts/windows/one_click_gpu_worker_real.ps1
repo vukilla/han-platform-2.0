@@ -8,7 +8,10 @@ param(
   [switch]$SetupGVHMR,
 
   # Optionally download the two direct-link checkpoints (gvhmr_siga24_release.ckpt + yolov8x.pt).
-  [switch]$DownloadLightCheckpoints
+  [switch]$DownloadLightCheckpoints,
+
+  # Best-effort attempt to download the remaining heavy checkpoints from GVHMR's public Google Drive folder.
+  [switch]$TryDownloadHeavyCheckpoints
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,9 +36,17 @@ if ($SetupGVHMR) {
   }
   Write-Host "-- Bootstrapping GVHMR (Windows) --" -ForegroundColor Cyan
   if ($DownloadLightCheckpoints) {
-    powershell -NoProfile -ExecutionPolicy Bypass -File $bootstrapGvhmr -DownloadLightCheckpoints
+    if ($TryDownloadHeavyCheckpoints) {
+      powershell -NoProfile -ExecutionPolicy Bypass -File $bootstrapGvhmr -DownloadLightCheckpoints -TryDownloadHeavyCheckpoints
+    } else {
+      powershell -NoProfile -ExecutionPolicy Bypass -File $bootstrapGvhmr -DownloadLightCheckpoints
+    }
   } else {
-    powershell -NoProfile -ExecutionPolicy Bypass -File $bootstrapGvhmr
+    if ($TryDownloadHeavyCheckpoints) {
+      powershell -NoProfile -ExecutionPolicy Bypass -File $bootstrapGvhmr -TryDownloadHeavyCheckpoints
+    } else {
+      powershell -NoProfile -ExecutionPolicy Bypass -File $bootstrapGvhmr
+    }
   }
   Write-Host ""
 }
@@ -46,4 +57,3 @@ powershell -NoProfile -ExecutionPolicy Bypass -File $oneClick -MacIp $MacIp -Isa
 Write-Host ""
 Write-Host "Next (Mac): run the REAL smoke test:" -ForegroundColor Green
 Write-Host "  ./scripts/smoke_e2e_with_gpu_real.sh"
-
