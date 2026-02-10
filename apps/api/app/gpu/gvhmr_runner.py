@@ -160,13 +160,16 @@ def _load_smpl_params(results_path: Path) -> dict[str, Any]:
 
 
 def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Path) -> dict[str, Any]:
-    """Create a lightweight skeleton preview video without PyTorch3D renderer.
+    """Create a lightweight GVHMR-style preview video without PyTorch3D renderer.
 
-    Output is a skeleton-only MP4. The Web UI shows it side-by-side with the original video.
+    GVHMR's official demo produces `<video_stem>_3_incam_global_horiz.mp4`:
+    left = in-camera mesh overlay, right = global mesh with a ground plane.
 
-    This is intentionally a fallback preview: GVHMR's official mesh renderer depends on
-    PyTorch3D renderer components that are painful to install on Windows. The skeleton
-    preview gives users immediate visual feedback in the Web UI.
+    In this platform we run GVHMR with `--skip_render` (PyTorch3D renderer/structures is
+    frequently unavailable on Windows). This function generates a *skeleton-based* preview
+    with the same layout:
+    left = 2D projection of recovered 3D joints overlaid on the input video
+    right = global-view skeleton with a perspective ground grid
     """
     import math
 
@@ -179,7 +182,9 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
     if str(gvhmr_root) not in sys.path:
         sys.path.insert(0, str(gvhmr_root))
 
-    from hmr4d.utils.body_model.smplx_lite import SmplxLiteCoco17
+    from hmr4d.utils.body_model.smplx_lite import SmplxLiteCoco17, SmplxLiteSmplN24
+    from hmr4d.utils.geo.hmr_cam import create_camera_sensor, estimate_K
+    from hmr4d.utils.geo_transform import apply_T_on_points, compute_T_ayfz2ay
 
     def _as_tensor(x) -> torch.Tensor:
         if torch.is_tensor(x):
@@ -187,27 +192,20 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
         return torch.from_numpy(np.asarray(x))
 
     pred = torch.load(results_path, map_location="cpu")
-    smpl_params = pred.get("smpl_params_global") or {}
-    if not smpl_params:
+    smpl_incam = pred.get("smpl_params_incam") or {}
+    smpl_global = pred.get("smpl_params_global") or {}
+    if not smpl_global:
         raise ValueError("hmr4d_results.pt missing smpl_params_global")
+    if not smpl_incam:
+        # Some outputs omit incam params; use global as best-effort.
+        smpl_incam = smpl_global
 
-    body_pose = _as_tensor(smpl_params.get("body_pose")).float()
-    global_orient = _as_tensor(smpl_params.get("global_orient")).float()
-    transl = smpl_params.get("transl", None)
-    transl = _as_tensor(transl).float() if transl is not None else torch.zeros((body_pose.shape[0], 3), dtype=torch.float32)
-    betas = _as_tensor(smpl_params.get("betas")).float()
-
-    # Add batch dim expected by SmplxLite.
-    if body_pose.ndim == 2:
-        body_pose = body_pose[None, ...]
-    if global_orient.ndim == 2:
-        global_orient = global_orient[None, ...]
-    if transl.ndim == 2:
-        transl = transl[None, ...]
-    if betas.ndim == 1:
-        betas = betas[None, ...]
-
-    total_frames = int(body_pose.shape[1])
+    # Determine the frame count from global body_pose.
+    body_pose_global = _as_tensor(smpl_global.get("body_pose")).float()
+    if body_pose_global.ndim == 2:
+        total_frames = int(body_pose_global.shape[0])
+    else:
+        total_frames = int(body_pose_global.shape[1])
     if total_frames <= 0:
         raise ValueError("smpl_params_global has no frames")
 
@@ -216,30 +214,49 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
     stride = max(1, int(math.ceil(total_frames / max_preview_frames)))
     frame_ids = np.arange(0, total_frames, stride, dtype=np.int32)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = SmplxLiteCoco17().to(device)
-    with torch.no_grad():
-        joints = model(
-            body_pose[:, frame_ids].to(device),
-            betas.to(device),
-            global_orient[:, frame_ids].to(device),
-            transl[:, frame_ids].to(device),
+    def _extract_params(
+        params: dict[str, Any], frame_ids: np.ndarray
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        body_pose = _as_tensor(params.get("body_pose")).float()
+        global_orient = _as_tensor(params.get("global_orient")).float()
+        transl = params.get("transl", None)
+        transl = (
+            _as_tensor(transl).float()
+            if transl is not None
+            else torch.zeros((body_pose.shape[0], 3), dtype=torch.float32)
         )
-    joints_np = joints.squeeze(0).detach().cpu().numpy()  # (F', 17, 3)
+        betas = _as_tensor(params.get("betas")).float()
 
-    # Center around pelvis (midpoint of left/right hip in COCO17 indices).
-    pelvis = 0.5 * (joints_np[:, 11, :] + joints_np[:, 12, :])  # (F', 3)
-    joints_np = joints_np - pelvis[:, None, :]
+        # Add batch dim expected by SmplxLite.
+        if body_pose.ndim == 2:
+            body_pose = body_pose[None, ...]
+        if global_orient.ndim == 2:
+            global_orient = global_orient[None, ...]
+        if transl.ndim == 2:
+            transl = transl[None, ...]
+        if betas.ndim == 1:
+            betas = betas[None, ...]
 
-    # Rotate about Y axis so Z contributes to apparent X (gives a 3D feel in orthographic projection).
-    theta = math.radians(35.0)
-    c, s = math.cos(theta), math.sin(theta)
-    R = np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]], dtype=np.float32)
-    joints_np = joints_np @ R.T
+        # Some outputs store betas per-frame; slice if needed.
+        if betas.ndim == 3 and betas.shape[1] >= int(frame_ids.max(initial=0) + 1):
+            betas_out = betas[:, frame_ids]
+        else:
+            betas_out = betas
 
-    cap = cv2.VideoCapture(str(video_path))
+        return (
+            body_pose[:, frame_ids],
+            betas_out,
+            global_orient[:, frame_ids],
+            transl[:, frame_ids],
+        )
+
+    # Prefer GVHMR's internal 30fps re-encoded video if present; it matches `hmr4d_results.pt` length exactly.
+    gvhmr_video = results_path.parent / "0_input_video.mp4"
+    video_for_preview = gvhmr_video if gvhmr_video.exists() else video_path
+
+    cap = cv2.VideoCapture(str(video_for_preview))
     if not cap.isOpened():
-        raise FileNotFoundError(f"Unable to open video with OpenCV: {video_path}")
+        raise FileNotFoundError(f"Unable to open video with OpenCV: {video_for_preview}")
 
     fps_in = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
     fps_out = max(1.0, fps_in / float(stride))
@@ -248,22 +265,21 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
     if w_in <= 0 or h_in <= 0:
         w_in, h_in = 640, 360
 
-    # Preserve the *exact* input resolution so the Web UI can display the original and GVHMR
-    # preview at the same size with no aspect-ratio drift from rounding.
-    #
-    # (We used to downscale to a max height, but users expect a 1:1 match with their upload.)
-    skel_w = int(w_in)
-    skel_h = int(h_in)
+    panel_w = int(w_in)
+    panel_h = int(h_in)
+    out_w = int(panel_w * 2)
+    out_h = int(panel_h)
 
-    x = joints_np[:, :, 0]
-    y = joints_np[:, :, 1]
-    xmin, xmax = float(np.min(x)), float(np.max(x))
-    ymin, ymax = float(np.min(y)), float(np.max(y))
-    x_center = 0.5 * (xmin + xmax)
-    y_center = 0.5 * (ymin + ymax)
-    span_x = max(1e-6, xmax - xmin)
-    span_y = max(1e-6, ymax - ymin)
-    skel_scale = 0.9 * min(float(skel_w) / span_x, float(skel_h) / span_y)
+    # In-camera intrinsics for projection.
+    K_fullimg = pred.get("K_fullimg", None)
+    if K_fullimg is None:
+        K_incam = estimate_K(panel_w, panel_h)
+    else:
+        K_incam = _as_tensor(K_fullimg[0] if hasattr(K_fullimg, "__len__") else K_fullimg).float()
+
+    # Global panel intrinsics (match GVHMR demo: render as a 24mm lens).
+    _, _, K_global = create_camera_sensor(panel_w, panel_h, 24)
+    K_global = _as_tensor(K_global).float()
 
     coco_edges = [
         (15, 13),
@@ -287,15 +303,131 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
         (4, 6),
     ]
 
+    def _project_pinhole(points: torch.Tensor, K: torch.Tensor) -> torch.Tensor:
+        # points: (..., 3), K: (3, 3) -> (..., 2)
+        z = points[..., 2:3].clone()
+        z.masked_fill_(z.abs() < 1e-6, 1e-6)
+        norm = points / z
+        uvw = torch.matmul(norm, K.T)
+        return uvw[..., :2]
+
+    def _yflip_if_better(points: torch.Tensor, K: torch.Tensor, w: int, h: int) -> torch.Tensor:
+        # Choose the projection with more joints inside the image.
+        with torch.no_grad():
+            uv0 = _project_pinhole(points, K)
+            points1 = points.clone()
+            points1[..., 1] *= -1.0
+            uv1 = _project_pinhole(points1, K)
+
+            def _score(uv: torch.Tensor) -> float:
+                u = uv[..., 0]
+                v = uv[..., 1]
+                ok = torch.isfinite(u) & torch.isfinite(v) & (u >= 0) & (u < float(w)) & (v >= 0) & (v < float(h))
+                return float(ok.float().mean().item())
+
+            return points1 if _score(uv1) > _score(uv0) else points
+
+    def _draw_skeleton(
+        img: np.ndarray,
+        uv: np.ndarray,
+        *,
+        color: tuple[int, int, int],
+        thickness: int,
+        radius: int,
+    ) -> None:
+        for a, b in coco_edges:
+            ax, ay = int(uv[a, 0]), int(uv[a, 1])
+            bx, by = int(uv[b, 0]), int(uv[b, 1])
+            cv2.line(img, (ax, ay), (bx, by), color, thickness, lineType=cv2.LINE_AA)
+        for k in range(uv.shape[0]):
+            xk, yk = int(uv[k, 0]), int(uv[k, 1])
+            cv2.circle(img, (xk, yk), radius, color, -1, lineType=cv2.LINE_AA)
+
+    # === Compute joints for sampled frames ===
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model_coco = SmplxLiteCoco17().to(device)
+    model_smpl24 = SmplxLiteSmplN24().to(device)
+
+    bp_i, be_i, go_i, tr_i = _extract_params(smpl_incam, frame_ids)
+    bp_g, be_g, go_g, tr_g = _extract_params(smpl_global, frame_ids)
+
+    with torch.no_grad():
+        joints_incam = model_coco(bp_i.to(device), be_i.to(device), go_i.to(device), tr_i.to(device)).squeeze(0)
+        joints_global_coco = model_coco(bp_g.to(device), be_g.to(device), go_g.to(device), tr_g.to(device)).squeeze(0)
+        joints_global_smpl24 = model_smpl24(bp_g.to(device), be_g.to(device), go_g.to(device), tr_g.to(device)).squeeze(0)
+
+    joints_incam = _yflip_if_better(joints_incam, K_incam.to(joints_incam), panel_w, panel_h)
+
+    # === Normalize + face-Z transform for global view (approx GVHMR `move_to_start_point_face_z`) ===
+    min_y = joints_global_smpl24[..., 1].min()
+    offset = joints_global_smpl24[0, 0].detach().clone()
+    offset[1] = min_y
+    joints_global_smpl24 = joints_global_smpl24 - offset[None, None, :]
+    joints_global_coco = joints_global_coco - offset[None, None, :]
+
+    T_ay2ayfz = compute_T_ayfz2ay(joints_global_smpl24[[0]], inverse=True)  # (1, 4, 4)
+    T_seq = T_ay2ayfz.repeat(joints_global_smpl24.shape[0], 1, 1)  # (F, 4, 4)
+    joints_global_smpl24 = apply_T_on_points(joints_global_smpl24, T_seq)
+    joints_global_coco = apply_T_on_points(joints_global_coco, T_seq)
+
+    # === Static global camera (similar to GVHMR `get_global_cameras_static`) ===
+    targets = joints_global_smpl24.mean(dim=1).detach().cpu()  # (F, 3)
+    targets[:, 1] = 0.0
+    target_center = targets.mean(dim=0)  # (3,)
+    target_scale = torch.norm(targets - target_center[None, :], dim=-1).max()
+    target_scale_val = float(max(target_scale.item(), 1.0)) * 2.0  # beta=2.0
+
+    vec_rad = float(math.radians(45.0))
+    vec = torch.tensor([math.sin(vec_rad), 0.0, math.cos(vec_rad)], dtype=torch.float32)
+    vec = vec / torch.norm(vec)
+    cam_pos = target_center + vec * target_scale_val
+    cam_pos[1] = target_scale_val * float(math.tan(math.radians(20.0))) + 1.0  # cam_height_degree=20, target_center_height=1.0
+
+    cam_target = target_center.clone()
+    cam_target[1] = 1.0
+    up = torch.tensor([0.0, 1.0, 0.0], dtype=torch.float32)
+
+    def _look_at_world_to_cam(pos: torch.Tensor, at: torch.Tensor, up_vec: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        # Returns (R, t) such that p_cam = p_world @ R.T + t
+        z = at - pos
+        z = z / torch.norm(z)
+        x = torch.cross(up_vec, z)
+        x = x / torch.norm(x)
+        # "y-down" camera frame so pinhole projection matches image coordinates.
+        y = -torch.cross(z, x)
+        R = torch.stack([x, y, z], dim=0)  # rows, world->cam
+        t = -(R @ pos)
+        return R, t
+
+    R_wc, t_wc = _look_at_world_to_cam(cam_pos, cam_target, up)
+
+    def _project_global(points_world: torch.Tensor) -> torch.Tensor:
+        pw = points_world.detach().cpu()
+        pc = torch.matmul(pw, R_wc.T) + t_wc
+        return _project_pinhole(pc, K_global)
+
+    # === Ground grid parameters (fixed across frames) ===
+    root_points = joints_global_smpl24[:, 0, :].detach().cpu().numpy()
+    cx = float((root_points[:, 0].max() + root_points[:, 0].min()) * 0.5)
+    cz = float((root_points[:, 2].max() + root_points[:, 2].min()) * 0.5)
+    all_pts = joints_global_smpl24.detach().cpu().numpy().reshape(-1, 3)
+    scale_x = float(all_pts[:, 0].max() - all_pts[:, 0].min())
+    scale_z = float(all_pts[:, 2].max() - all_pts[:, 2].min())
+    grid_scale = max(scale_x, scale_z, 1.0) * 1.5
+    grid_half = 0.5 * grid_scale
+    grid_steps = 10
+    grid_step = grid_scale / float(grid_steps)
+
+    # === Render merged preview ===
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out_mp4_path.parent.mkdir(parents=True, exist_ok=True)
-    writer = cv2.VideoWriter(str(out_mp4_path), fourcc, fps_out, (skel_w, skel_h))
+    writer = cv2.VideoWriter(str(out_mp4_path), fourcc, fps_out, (out_w, out_h))
     if not writer.isOpened():
         raise RuntimeError(f"Unable to create VideoWriter for: {out_mp4_path}")
 
     try:
         frame_idx = 0
-        for jidx in range(joints_np.shape[0]):
+        for jidx in range(int(frame_ids.shape[0])):
             ok, frame = cap.read()
             if not ok:
                 break
@@ -305,20 +437,13 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
                 continue
             frame_idx += 1
 
-            skel = np.zeros((skel_h, skel_w, 3), dtype=np.uint8)
-            skel[:] = (14, 12, 10)
-            pts = joints_np[jidx]
-            u = ((pts[:, 0] - x_center) * skel_scale + skel_w * 0.5).astype(np.int32)
-            v = ((-(pts[:, 1] - y_center)) * skel_scale + skel_h * 0.55).astype(np.int32)
-
-            for a, b in coco_edges:
-                cv2.line(skel, (int(u[a]), int(v[a])), (int(u[b]), int(v[b])), (70, 255, 120), 3)
-            for k in range(pts.shape[0]):
-                cv2.circle(skel, (int(u[k]), int(v[k])), 4, (70, 255, 120), -1)
-
+            # Left panel: original frame with projected joints overlay.
+            left = frame.copy()
+            uv_in = _project_pinhole(joints_incam[jidx].detach().cpu(), K_incam).numpy()
+            _draw_skeleton(left, uv_in, color=(70, 255, 120), thickness=3, radius=4)
             cv2.putText(
-                skel,
-                "GVHMR 3D skeleton (preview)",
+                left,
+                "GVHMR incam (skeleton preview)",
                 (12, 28),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
@@ -327,7 +452,39 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
                 cv2.LINE_AA,
             )
 
-            writer.write(skel)
+            # Right panel: global-view skeleton + ground grid.
+            right = np.full((panel_h, panel_w, 3), 255, dtype=np.uint8)
+            grid_color = (210, 210, 210)
+            for i in range(grid_steps + 1):
+                x = cx - grid_half + float(i) * grid_step
+                p0 = torch.tensor([x, 0.0, cz - grid_half], dtype=torch.float32)
+                p1 = torch.tensor([x, 0.0, cz + grid_half], dtype=torch.float32)
+                uv0 = _project_global(p0).numpy().astype(np.int32)
+                uv1 = _project_global(p1).numpy().astype(np.int32)
+                cv2.line(right, (int(uv0[0]), int(uv0[1])), (int(uv1[0]), int(uv1[1])), grid_color, 1, cv2.LINE_AA)
+
+                z = cz - grid_half + float(i) * grid_step
+                p0 = torch.tensor([cx - grid_half, 0.0, z], dtype=torch.float32)
+                p1 = torch.tensor([cx + grid_half, 0.0, z], dtype=torch.float32)
+                uv0 = _project_global(p0).numpy().astype(np.int32)
+                uv1 = _project_global(p1).numpy().astype(np.int32)
+                cv2.line(right, (int(uv0[0]), int(uv0[1])), (int(uv1[0]), int(uv1[1])), grid_color, 1, cv2.LINE_AA)
+
+            uv_glob = _project_global(joints_global_coco[jidx]).numpy()
+            _draw_skeleton(right, uv_glob, color=(120, 120, 120), thickness=3, radius=4)
+            cv2.putText(
+                right,
+                "GVHMR global (skeleton preview)",
+                (12, 28),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (35, 35, 35),
+                2,
+                cv2.LINE_AA,
+            )
+
+            merged = np.concatenate([left, right], axis=1)
+            writer.write(merged)
     finally:
         cap.release()
         writer.release()
@@ -338,7 +495,8 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
         "fps_in": fps_in,
         "fps_out": fps_out,
         "stride": int(stride),
-        "frames_out": int(joints_np.shape[0]),
+        "frames_out": int(frame_ids.shape[0]),
+        "layout": "incam_global_horiz_skeleton",
     }
 
 
