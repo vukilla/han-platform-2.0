@@ -257,7 +257,17 @@ export default function JobProgressPage() {
                 />
               ) : (
                 <p className="text-sm text-black/60">
-                  {status === "ESTIMATE_POSE" ? "GVHMR running..." : "Waiting for pose preview..."}
+                  {jobIsComplete
+                    ? poseOk === false
+                      ? "GVHMR fell back to a placeholder pose (no preview video). See the pose log below."
+                      : "Pose preview not available yet. See the pose log below if this persists."
+                    : jobIsFailed
+                      ? "Pose preview failed. See the worker error/logs."
+                      : status === "ESTIMATE_POSE"
+                        ? "GVHMR running..."
+                        : status === "RENDER_PREVIEWS"
+                          ? "Rendering preview..."
+                          : "Waiting for pose preview..."}
                 </p>
               )}
             </div>
