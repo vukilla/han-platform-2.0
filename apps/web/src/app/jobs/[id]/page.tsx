@@ -32,6 +32,7 @@ export default function JobProgressPage() {
   const [demo, setDemo] = useState<DemoOut | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [gpuReady, setGpuReady] = useState<boolean | null>(null);
+  const [jobLogTail, setJobLogTail] = useState<string | null>(null);
   const requestedTrainMode: "nep" | "mocap" = searchParams?.get("train_mode") === "mocap" ? "mocap" : "nep";
   const requestedTrainBackend: "synthetic" | "isaaclab_teacher_ppo" =
     searchParams?.get("train_backend") === "isaaclab_teacher_ppo" ? "isaaclab_teacher_ppo" : "synthetic";
@@ -70,6 +71,31 @@ export default function JobProgressPage() {
       }
     };
   }, [jobId]);
+
+  useEffect(() => {
+    if (!job?.logs_uri) return;
+    let timer: NodeJS.Timeout | null = null;
+    let cancelled = false;
+
+    async function fetchLogs() {
+      try {
+        const res = await fetch(job.logs_uri as string);
+        if (!res.ok) return;
+        const text = await res.text();
+        const tail = text.split("\n").slice(-200).join("\n");
+        if (!cancelled) setJobLogTail(tail);
+      } catch {
+        // ignore
+      }
+    }
+
+    fetchLogs();
+    timer = setInterval(fetchLogs, 3000);
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [job?.logs_uri]);
 
   useEffect(() => {
     if (!job?.demo_id) return;
@@ -329,6 +355,16 @@ export default function JobProgressPage() {
             ) : null}
             <span className="text-sm text-black/60">GVHMR setup: see `docs/GVHMR.md` in the repo</span>
           </div>
+        </Card>
+      ) : null}
+
+      {jobLogTail ? (
+        <Card className="space-y-3">
+          <h2 className="text-xl font-semibold text-black">Live logs</h2>
+          <p className="text-sm text-black/70">These update every few seconds while the job runs.</p>
+          <pre className="max-h-80 overflow-auto rounded-2xl border border-black/10 bg-black p-4 text-xs text-white">
+            {jobLogTail}
+          </pre>
         </Card>
       ) : null}
 
