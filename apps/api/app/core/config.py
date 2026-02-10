@@ -7,6 +7,11 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://han:han@db:5432/han"
     redis_url: str = "redis://redis:6379/0"
 
+    # CORS: required for the browser-based Web UI to call the API.
+    # Defaults are intentionally permissive for local development; tighten for production.
+    cors_allow_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    cors_allow_origin_regex: str = r"^https?://(localhost|127\\.0\\.0\\.1|192\\.168\\.\\d+\\.\\d+)(:\\d+)?$"
+
     s3_endpoint: str = "http://minio:9000"
     # Endpoint used for presigned URLs handed to a browser/client.
     # In docker-compose this should generally be a host-reachable address like http://localhost:9000.
