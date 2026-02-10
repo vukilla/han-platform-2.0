@@ -23,7 +23,13 @@ if ($MacIp) {
 }
 
 foreach ($k in @("REDIS_URL", "DATABASE_URL", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET")) {
-  if (-not $env:$k) {
+  $val = ""
+  try {
+    $val = (Get-Item -Path ("Env:" + $k) -ErrorAction Stop).Value
+  } catch {
+    $val = ""
+  }
+  if (-not $val) {
     throw "Missing required env var: $k"
   }
 }
