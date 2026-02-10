@@ -10,17 +10,20 @@
 - Web UI boots and builds:
   - Dev UI: `http://localhost:3000`
   - Production build (sanity): `npm run build` in `apps/web` succeeds.
-- GVHMR-only flow is available:
-  - `http://localhost:3000/gvhmr`
-  - Upload video, click Run, job page shows side-by-side:
+- Motion-recovery-only flow is available (simplest UX):
+  - `http://localhost:3000/studio`
+  - Upload video, click `Run motion recovery`, job page shows side-by-side:
     - Original video
     - GVHMR 3D skeleton preview (same resolution as the original)
+- Navigation simplified:
+  - Top nav: Dashboard, Studio, Rewards, Deploy (Coming soon)
+  - `/` redirects to `/dashboard`
 
 ## GVHMR Prerequisite (Licensed)
 Real GVHMR requires the SMPL-X model file `SMPLX_NEUTRAL.npz` (licensed, not bundled).
 
 One-time setup:
-- Upload via Web UI: `http://localhost:3000/gvhmr`
+- Upload via Web UI: `http://localhost:3000/studio` (preferred) or `http://localhost:3000/gvhmr`
 - Or API: `POST /admin/gvhmr/smplx-model` (multipart field `file`)
 
 Details: `/Users/robertvukosa/Downloads/Python/han-platform-2.0/docs/GVHMR.md`
@@ -39,4 +42,3 @@ If missing, the platform:
 - XGen stages beyond pose estimation (retarget/contact/noncontact/augment) are still placeholders.
 - XMimic training defaults to a synthetic backend for fast end-to-end UI plumbing.
   - The "real" Isaac Lab PPO backend exists but is still experimental and may require additional iteration.
-
