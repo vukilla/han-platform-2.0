@@ -130,10 +130,23 @@ def train_teacher_ppo(
         # Best-effort; if this fails we still try to launch SimulationApp.
         pass
 
-    log(f"[isaacsim] launching headless SimulationApp device={cfg.device}")
-    from isaacsim import SimulationApp
+    # IMPORTANT:
+    # On Windows, we run the GPU Celery worker *inside* Isaac Sim's Python (Kit).
+    # In that case, Kit is already initialized. Creating/closing a new SimulationApp
+    # will often shut down the entire process, killing the Celery worker.
+    simulation_app = None
+    try:
+        from omni.kit.app import get_app  # type: ignore
 
-    simulation_app = SimulationApp({"headless": True})
+        if get_app() is not None:
+            log("[isaacsim] detected existing Kit app; skipping SimulationApp init/close")
+        else:
+            raise ImportError("Kit app not initialized")
+    except Exception:
+        log(f"[isaacsim] launching headless SimulationApp device={cfg.device}")
+        from isaacsim import SimulationApp
+
+        simulation_app = SimulationApp({"headless": True})
 
     try:
         # Import Isaac Lab only after SimulationApp is live.
@@ -275,7 +288,8 @@ def train_teacher_ppo(
         except Exception:
             pass
         try:
-            simulation_app.close()
+            if simulation_app is not None:
+                simulation_app.close()
         except Exception:
             pass
         try:
