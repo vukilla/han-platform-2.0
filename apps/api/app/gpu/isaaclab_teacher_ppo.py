@@ -95,6 +95,7 @@ def train_teacher_ppo(
     It is not expected to reach high performance in the default settings.
     """
     import os
+    import sys
     import time
 
     import torch
@@ -115,6 +116,20 @@ def train_teacher_ppo(
     # IMPORTANT (Windows / Isaac Sim 5.x):
     # `omni.*` modules (including `omni.timeline`) are only importable after Kit is initialized.
     # Importing Isaac Lab modules too early can fail with `ModuleNotFoundError: omni.timeline`.
+    #
+    # When launched from a Celery worker, stdout/stderr can be wrapped by Celery's LoggingProxy
+    # which lacks `.fileno()`. Isaac Sim's SimulationApp expects real file handles.
+    _orig_stdout = sys.stdout
+    _orig_stderr = sys.stderr
+    try:
+        if not hasattr(sys.stdout, "fileno"):
+            sys.stdout = sys.__stdout__ if hasattr(sys.__stdout__, "fileno") else open(os.devnull, "w")
+        if not hasattr(sys.stderr, "fileno"):
+            sys.stderr = sys.__stderr__ if hasattr(sys.__stderr__, "fileno") else open(os.devnull, "w")
+    except Exception:
+        # Best-effort; if this fails we still try to launch SimulationApp.
+        pass
+
     log(f"[isaacsim] launching headless SimulationApp device={cfg.device}")
     from isaacsim import SimulationApp
 
@@ -261,5 +276,10 @@ def train_teacher_ppo(
             pass
         try:
             simulation_app.close()
+        except Exception:
+            pass
+        try:
+            sys.stdout = _orig_stdout
+            sys.stderr = _orig_stderr
         except Exception:
             pass
