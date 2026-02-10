@@ -37,21 +37,21 @@ if (-not (Test-Path $isaacLabBat)) {
 
 Write-Host ""
 Write-Host "-- Connectivity Check (Windows -> Mac control-plane) --" -ForegroundColor Cyan
-function Assert-TcpPort([string]$Host, [int]$Port, [string]$Label) {
+function Assert-TcpPort([string]$ComputerName, [int]$Port, [string]$Label) {
   try {
-    $res = Test-NetConnection -ComputerName $Host -Port $Port -WarningAction SilentlyContinue
+    $res = Test-NetConnection -ComputerName $ComputerName -Port $Port -WarningAction SilentlyContinue
   } catch {
-    throw "Failed to test connectivity to $Host`:$Port ($Label): $($_.Exception.Message)"
+    throw "Failed to test connectivity to $ComputerName`:$Port ($Label): $($_.Exception.Message)"
   }
   if (-not $res.TcpTestSucceeded) {
-    throw "Cannot reach $Host`:$Port ($Label). Ensure the Mac control-plane is running and macOS firewall allows inbound connections."
+    throw "Cannot reach $ComputerName`:$Port ($Label). Ensure the Mac control-plane is running and macOS firewall allows inbound connections."
   }
-  Write-Host "OK: $Label ($Host`:$Port)"
+  Write-Host "OK: $Label ($ComputerName`:$Port)"
 }
 
-Assert-TcpPort -Host $MacIp -Port 6379 -Label "Redis"
-Assert-TcpPort -Host $MacIp -Port 9000 -Label "MinIO (S3)"
-Assert-TcpPort -Host $MacIp -Port 5432 -Label "Postgres"
+Assert-TcpPort -ComputerName $MacIp -Port 6379 -Label "Redis"
+Assert-TcpPort -ComputerName $MacIp -Port 9000 -Label "MinIO (S3)"
+Assert-TcpPort -ComputerName $MacIp -Port 5432 -Label "Postgres"
 
 Write-Host ""
 Write-Host "-- Starting GPU worker (detached) --" -ForegroundColor Cyan
