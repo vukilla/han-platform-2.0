@@ -56,15 +56,17 @@ This is the simplest “phone video -> 3D motion” UX loop.
 Notes:
 - `http://localhost:3000/gvhmr` is still available as a troubleshooting/setup page.
 
-Fastest “do it for me” launch:
-
-1. On Mac:
+Fastest “do it for me” launch (GVHMR-only, recommended):
 
 ```bash
-/Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/mac/run_full_e2e.sh
+WINDOWS_GPU_IP=<windows_ip> /Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/mac/run_gvhmr_studio_ssh.sh
 ```
 
-2. When it prints your Mac IP, run the printed Windows command on the GPU PC. The Mac script will automatically continue once the GPU worker is detected.
+This will:
+1. Start the Mac control-plane (docker compose)
+1. Start/restart the Windows pose worker over SSH (queue: `pose`)
+1. Run the motion-recovery smoke test (upload -> GVHMR -> preview)
+1. Print the `/jobs/<id>` URL to open in the browser
 
 Fastest REAL “do it for me” launch (GVHMR + Isaac Lab PPO):
 
