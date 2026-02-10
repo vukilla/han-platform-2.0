@@ -344,13 +344,25 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
     targets[:, 1] = 0.0
     target_center = targets.mean(dim=0)  # (3,)
     target_scale = torch.norm(targets - target_center[None, :], dim=-1).max()
-    target_scale_val = float(max(target_scale.item(), 1.0)) * 2.0  # beta=2.0
+    target_scale_val = float(max(target_scale.item(), 1.0)) * 2.0  # beta=2.0 (GVHMR default)
+
+    # Fit the camera distance to the motion radius so the subject stays in-frame.
+    fx = float(K_global[0, 0].item())
+    fy = float(K_global[1, 1].item())
+    fov_x = 2.0 * math.atan((float(panel_w) * 0.5) / max(fx, 1e-6))
+    fov_y = 2.0 * math.atan((float(panel_h) * 0.5) / max(fy, 1e-6))
+    fov = float(min(fov_x, fov_y))
+    joints_cpu = joints_global_smpl24.detach().cpu().reshape(-1, 3)
+    radius = torch.norm(joints_cpu - target_center[None, :], dim=-1).max()
+    # Distance required so that the bounding sphere roughly fits the view frustum.
+    dist_fit = float(radius.item()) / max(math.tan(fov * 0.5), 1e-3) * 1.25
+    cam_dist = float(max(target_scale_val, dist_fit))
 
     vec_rad = float(math.radians(45.0))
     vec = torch.tensor([math.sin(vec_rad), 0.0, math.cos(vec_rad)], dtype=torch.float32)
     vec = vec / torch.norm(vec)
-    cam_pos = target_center + vec * target_scale_val
-    cam_pos[1] = target_scale_val * float(math.tan(math.radians(20.0))) + 1.0  # cam_height_degree=20, target_center_height=1.0
+    cam_pos = target_center + vec * cam_dist
+    cam_pos[1] = cam_dist * float(math.tan(math.radians(20.0))) + 1.0  # cam_height_degree=20, target_center_height=1.0
 
     cam_target = target_center.clone()
     cam_target[1] = 1.0
@@ -414,13 +426,13 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
     R_wc_np = R_wc.detach().cpu().numpy()  # (3, 3)
     t_wc_np = t_wc.detach().cpu().numpy()  # (3,)
 
-    def _render_body_mesh(img: np.ndarray, verts_world: np.ndarray) -> None:
+    def _render_body_mesh(img: np.ndarray, verts_world: np.ndarray) -> bool:
         # Render as a depth-shaded dense point cloud (fast + no extra deps).
         verts_cam = verts_world @ R_wc_np.T + t_wc_np  # (V, 3)
         z = verts_cam[:, 2]
         valid = z > 1e-6
         if not np.any(valid):
-            return
+            return False
 
         x = verts_cam[valid, 0]
         y = verts_cam[valid, 1]
@@ -431,7 +443,7 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
         vi = np.rint(v).astype(np.int32)
         in_img = (ui >= 0) & (ui < panel_w) & (vi >= 0) & (vi < panel_h)
         if not np.any(in_img):
-            return
+            return False
 
         ui = ui[in_img]
         vi = vi[in_img]
@@ -444,13 +456,15 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
 
         valid_depth = np.isfinite(depth)
         if not np.any(valid_depth):
-            return
+            return False
 
         # Close small holes so the body looks like a continuous surface.
         mask_u8 = (valid_depth.astype(np.uint8) * 255)
         kernel = np.ones((5, 5), np.uint8)
         mask_u8 = cv2.morphologyEx(mask_u8, cv2.MORPH_CLOSE, kernel, iterations=2)
         mask = mask_u8 > 0
+        if not np.any(mask):
+            return False
 
         d_valid = depth[valid_depth]
         dmin = float(np.percentile(d_valid, 5))
@@ -479,6 +493,7 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
         # Subtle outline to make limbs read better.
         edges = cv2.Canny(mask_u8, 60, 160)
         img[edges > 0] = (120, 120, 120)
+        return True
 
     # === Render global preview ===
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -493,7 +508,13 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
             for quad, color in checker_quads:
                 cv2.fillConvexPoly(img, quad, color, lineType=cv2.LINE_AA)
 
-            _render_body_mesh(img, verts_global_np[jidx])
+            drew = _render_body_mesh(img, verts_global_np[jidx])
+            if not drew:
+                # Fallback to skeleton so users never see an empty "room" preview.
+                uv = _project_global(joints_global_smpl24[jidx])
+                uv_np = uv.detach().cpu().numpy()
+                if np.all(np.isfinite(uv_np)):
+                    _draw_skeleton(img, uv_np, color=(90, 90, 90), thickness=3, radius=4)
 
             writer.write(img)
     finally:
@@ -506,7 +527,7 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
         "fps_out": fps_out,
         "stride": int(stride),
         "frames_out": int(frame_ids.shape[0]),
-        "layout": "global_skeleton",
+        "layout": "global_meshlike",
     }
 
 
@@ -550,10 +571,36 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
     gvhmr_pp = str(gvhmr_root)
     env["PYTHONPATH"] = gvhmr_pp if not pythonpath else (gvhmr_pp + os.pathsep + pythonpath)
 
+    # The Windows bootstrap installs a minimal `external/gvhmr/pytorch3d` stub so GVHMR can
+    # run inference without the full PyTorch3D renderer. When native rendering is enabled
+    # (GVHMR_NATIVE_RENDER=1), the stub would shadow the real `pytorch3d` package in
+    # site-packages. Temporarily move it aside so GVHMR can import `pytorch3d.renderer`.
+    stub_dir = gvhmr_root / "pytorch3d"
+    stub_backup = gvhmr_root / "pytorch3d_stub_han"
+    moved_stub = False
+    if enable_native_render and stub_dir.exists() and stub_dir.is_dir():
+        try:
+            if stub_backup.exists():
+                shutil.rmtree(stub_backup)
+            stub_dir.rename(stub_backup)
+            moved_stub = True
+        except Exception:
+            moved_stub = False
+
     # GVHMR can be very verbose; keep stdout clean so the parent process can parse our JSON result.
     gvhmr_log = output_dir / "gvhmr.log"
-    with gvhmr_log.open("w", encoding="utf-8") as handle:
-        proc = subprocess.run(cmd, check=False, cwd=str(gvhmr_root), env=env, stdout=handle, stderr=handle)
+    try:
+        with gvhmr_log.open("w", encoding="utf-8") as handle:
+            proc = subprocess.run(cmd, check=False, cwd=str(gvhmr_root), env=env, stdout=handle, stderr=handle)
+    finally:
+        if moved_stub:
+            try:
+                if stub_dir.exists():
+                    shutil.rmtree(stub_dir)
+                stub_backup.rename(stub_dir)
+            except Exception:
+                # Best-effort restore; if this fails the next run may require re-running bootstrap_gvhmr.ps1.
+                pass
 
     meta_path = output_dir / f"{video_path.stem}_gvhmr_meta.json"
     if proc.returncode != 0:

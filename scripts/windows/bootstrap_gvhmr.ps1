@@ -110,6 +110,16 @@ Copy-Item -Path $stubSrc -Destination $stubDst -Recurse -Force
 Write-Host "-- Installing GVHMR runtime deps into Isaac Sim python --" -ForegroundColor Cyan
 Invoke-CmdChecked "`"$isaacLabBat`" -p -m pip install -r `"$reqFile`""
 
+Write-Host "-- Installing PyTorch3D renderer (required for mesh videos) --" -ForegroundColor Cyan
+# GVHMR's official renderer depends on `pytorch3d.renderer`. PyTorch3D is not published on PyPI,
+# so we install prebuilt wheels from a community package index.
+#
+# Notes:
+# - The wheel below is currently built against CUDA 12.6; on Blackwell GPUs (e.g. RTX 5090) the
+#   CUDA kernels may be missing and rendering will fall back to CPU via our GVHMR patch.
+# - We use `--no-deps` to avoid pip trying to replace Isaac Sim's pinned torch build.
+Invoke-CmdChecked "`"$isaacLabBat`" -p -m pip install --no-deps --extra-index-url https://miropsota.github.io/torch_packages_builder/ pytorch3d==0.7.9+pt2.7.1cu126"
+
 Write-Host ""
 Write-Host "-- Checkpoints --" -ForegroundColor Cyan
 Write-Host "GVHMR expects checkpoints under:" -ForegroundColor Cyan

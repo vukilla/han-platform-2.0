@@ -50,6 +50,18 @@ if ($queueTokens -contains "gpu") {
 }
 $env:HAN_WORKER_ROLE = $role
 
+# GVHMR native mesh rendering:
+# - When enabled, the GVHMR demo will produce `2_global.mp4` (and related videos) which the platform
+#   can use as the 3D preview.
+# - Default to CPU rendering for now on Blackwell GPUs (e.g. RTX 5090) because most prebuilt
+#   PyTorch3D CUDA wheels lack sm_120 kernels; GVHMR will still render correctly on CPU.
+if (-not $env:GVHMR_NATIVE_RENDER) {
+  $env:GVHMR_NATIVE_RENDER = "1"
+}
+if (-not $env:GVHMR_RENDER_DEVICE) {
+  $env:GVHMR_RENDER_DEVICE = "cpu"
+}
+
 foreach ($k in @("REDIS_URL", "DATABASE_URL", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET")) {
   $val = ""
   try {

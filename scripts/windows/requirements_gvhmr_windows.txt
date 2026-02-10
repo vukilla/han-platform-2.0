@@ -2,8 +2,9 @@
 #
 # Important:
 # - Do NOT pin torch/torchvision here. Isaac Sim / Isaac Lab ship their own CUDA builds.
-# - PyTorch3D is intentionally NOT installed (Linux-only wheels). We patch GVHMR to support
-#   `--skip_render` and provide a small `pytorch3d` stub for the APIs GVHMR uses.
+# - PyTorch3D is installed separately by `scripts/windows/bootstrap_gvhmr.ps1` (from a community wheel index).
+#   We still patch GVHMR to support `--skip_render` and provide a small `pytorch3d` stub so inference
+#   can run even if the renderer is unavailable.
 #
 # If an install fails due to path length, move the repo to a short path:
 #   C:\src\han-platform-2.0
