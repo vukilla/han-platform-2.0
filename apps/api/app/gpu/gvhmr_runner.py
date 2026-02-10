@@ -181,7 +181,7 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
     if str(gvhmr_root) not in sys.path:
         sys.path.insert(0, str(gvhmr_root))
 
-    from hmr4d.utils.body_model.smplx_lite import SmplxLiteCoco17, SmplxLiteSmplN24
+    from hmr4d.utils.body_model.smplx_lite import SmplxLite, SmplxLiteSmplN24
     from hmr4d.utils.geo.hmr_cam import create_camera_sensor
     from hmr4d.utils.geo_transform import apply_T_on_points, compute_T_ayfz2ay
 
@@ -316,28 +316,28 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
             xk, yk = int(uv[k, 0]), int(uv[k, 1])
             cv2.circle(img, (xk, yk), radius, color, -1, lineType=cv2.LINE_AA)
 
-    # === Compute joints for sampled frames ===
+    # === Compute mesh + joints for sampled frames ===
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model_coco = SmplxLiteCoco17().to(device)
     model_smpl24 = SmplxLiteSmplN24().to(device)
+    model_mesh = SmplxLite().to(device)
 
     bp_g, be_g, go_g, tr_g = _extract_params(smpl_global, frame_ids)
 
     with torch.no_grad():
-        joints_global_coco = model_coco(bp_g.to(device), be_g.to(device), go_g.to(device), tr_g.to(device)).squeeze(0)
         joints_global_smpl24 = model_smpl24(bp_g.to(device), be_g.to(device), go_g.to(device), tr_g.to(device)).squeeze(0)
+        verts_global = model_mesh(bp_g.to(device), be_g.to(device), go_g.to(device), tr_g.to(device)).squeeze(0)
 
     # === Normalize + face-Z transform for global view (approx GVHMR `move_to_start_point_face_z`) ===
-    min_y = joints_global_smpl24[..., 1].min()
+    min_y = verts_global[..., 1].min()
     offset = joints_global_smpl24[0, 0].detach().clone()
     offset[1] = min_y
     joints_global_smpl24 = joints_global_smpl24 - offset[None, None, :]
-    joints_global_coco = joints_global_coco - offset[None, None, :]
+    verts_global = verts_global - offset[None, None, :]
 
     T_ay2ayfz = compute_T_ayfz2ay(joints_global_smpl24[[0]], inverse=True)  # (1, 4, 4)
     T_seq = T_ay2ayfz.repeat(joints_global_smpl24.shape[0], 1, 1)  # (F, 4, 4)
     joints_global_smpl24 = apply_T_on_points(joints_global_smpl24, T_seq)
-    joints_global_coco = apply_T_on_points(joints_global_coco, T_seq)
+    verts_global = apply_T_on_points(verts_global, T_seq)
 
     # === Static global camera (similar to GVHMR `get_global_cameras_static`) ===
     targets = joints_global_smpl24.mean(dim=1).detach().cpu()  # (F, 3)
@@ -409,6 +409,77 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
             color = checker_a if (ix + iz) % 2 == 0 else checker_b
             checker_quads.append((quad, color))
 
+    verts_global_np = verts_global.detach().cpu().numpy()  # (F', V, 3)
+    K_global_np = K_global.detach().cpu().numpy()  # (3, 3)
+    R_wc_np = R_wc.detach().cpu().numpy()  # (3, 3)
+    t_wc_np = t_wc.detach().cpu().numpy()  # (3,)
+
+    def _render_body_mesh(img: np.ndarray, verts_world: np.ndarray) -> None:
+        # Render as a depth-shaded dense point cloud (fast + no extra deps).
+        verts_cam = verts_world @ R_wc_np.T + t_wc_np  # (V, 3)
+        z = verts_cam[:, 2]
+        valid = z > 1e-6
+        if not np.any(valid):
+            return
+
+        x = verts_cam[valid, 0]
+        y = verts_cam[valid, 1]
+        z = z[valid]
+        u = (x / z) * float(K_global_np[0, 0]) + float(K_global_np[0, 2])
+        v = (y / z) * float(K_global_np[1, 1]) + float(K_global_np[1, 2])
+        ui = np.rint(u).astype(np.int32)
+        vi = np.rint(v).astype(np.int32)
+        in_img = (ui >= 0) & (ui < panel_w) & (vi >= 0) & (vi < panel_h)
+        if not np.any(in_img):
+            return
+
+        ui = ui[in_img]
+        vi = vi[in_img]
+        z = z[in_img].astype(np.float32)
+
+        idx = (vi.astype(np.int64) * int(panel_w) + ui.astype(np.int64)).astype(np.int64)
+        depth_flat = np.full(int(panel_h) * int(panel_w), np.inf, dtype=np.float32)
+        np.minimum.at(depth_flat, idx, z)
+        depth = depth_flat.reshape((int(panel_h), int(panel_w)))
+
+        valid_depth = np.isfinite(depth)
+        if not np.any(valid_depth):
+            return
+
+        # Close small holes so the body looks like a continuous surface.
+        mask_u8 = (valid_depth.astype(np.uint8) * 255)
+        kernel = np.ones((5, 5), np.uint8)
+        mask_u8 = cv2.morphologyEx(mask_u8, cv2.MORPH_CLOSE, kernel, iterations=2)
+        mask = mask_u8 > 0
+
+        d_valid = depth[valid_depth]
+        dmin = float(np.percentile(d_valid, 5))
+        dmax = float(np.percentile(d_valid, 95))
+        if not (dmax > dmin):
+            dmin = float(d_valid.min())
+            dmax = float(d_valid.max() + 1e-3)
+
+        depth_clamped = depth.copy()
+        depth_clamped[~valid_depth] = dmax
+        depth_clamped = np.clip(depth_clamped, dmin, dmax)
+        depth_norm = (depth_clamped - dmin) / (dmax - dmin + 1e-6)
+        depth_u8 = np.clip(depth_norm * 255.0, 0, 255).astype(np.uint8)
+        depth_u8[~valid_depth] = 0
+
+        # Fill missing depth where the vertex cloud was sparse.
+        inpaint_mask = (~valid_depth).astype(np.uint8) * 255
+        depth_u8_filled = cv2.inpaint(depth_u8, inpaint_mask, 3, cv2.INPAINT_TELEA)
+
+        depth_f = depth_u8_filled.astype(np.float32) / 255.0
+        intensity = 0.88 - 0.38 * depth_f  # nearer -> brighter
+        body = np.clip(intensity * 255.0, 0, 255).astype(np.uint8)
+
+        img[mask] = np.stack([body, body, body], axis=-1)[mask]
+
+        # Subtle outline to make limbs read better.
+        edges = cv2.Canny(mask_u8, 60, 160)
+        img[edges > 0] = (120, 120, 120)
+
     # === Render global preview ===
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out_mp4_path.parent.mkdir(parents=True, exist_ok=True)
@@ -422,8 +493,7 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
             for quad, color in checker_quads:
                 cv2.fillConvexPoly(img, quad, color, lineType=cv2.LINE_AA)
 
-            uv_glob = _project_global(joints_global_coco[jidx]).detach().cpu().numpy()
-            _draw_skeleton(img, uv_glob, color=(150, 150, 150), thickness=3, radius=4)
+            _render_body_mesh(img, verts_global_np[jidx])
 
             writer.write(img)
     finally:
