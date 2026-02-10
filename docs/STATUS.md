@@ -21,7 +21,7 @@
 - Paper-fidelity work continues on laptop: Table IV obs/reward schema parity and CPU-side contact refinement improvements
   - Relative motion reward parity tightened (Eq. 10 uses mean squared L2 norm).
   - Contact refinement upgraded: optional CPU robot IK refinement for contact frames (pre-physics).
-  - Simplified web wizard: single "Run end-to-end" preset (Fast vs Real) and optional auto-train from the job page.
+  - Simplified web wizard: minimal upload + single "Generate dataset and policy" button. All robot/object/annotation knobs moved under "Advanced settings (optional)".
   - Added Mac scripts to start the Windows GPU worker via SSH and run the REAL E2E in one command:
     - `scripts/mac/start_windows_gpu_worker_ssh.sh`
     - `scripts/mac/run_full_e2e_real_ssh.sh`

@@ -131,24 +131,14 @@ export default function NewDemoPage() {
   return (
     <div className="space-y-8">
       <section>
-        <p className="section-eyebrow">New demo wizard</p>
-        <h1 className="text-3xl font-semibold text-black">Upload, annotate, and launch XGen.</h1>
+        <p className="section-eyebrow">Teach A Robot From A Video</p>
+        <h1 className="text-3xl font-semibold text-black">Upload one phone video. Get a dataset and a policy.</h1>
+        <p className="mt-2 max-w-2xl text-sm text-black/70">
+          Minimal flow: upload, run XGen, then (optionally) train an XMimic policy. Advanced settings are optional.
+        </p>
       </section>
 
       <div className="grid gap-6">
-        <Card className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-black">0. Project</h2>
-            <Badge label="Required" tone="amber" />
-          </div>
-          <input
-            type="text"
-            value={projectName}
-            onChange={(event) => setProjectName(event.target.value)}
-            className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
-          />
-        </Card>
-
         <Card className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold text-black">1. Upload video</h2>
@@ -159,126 +149,12 @@ export default function NewDemoPage() {
             onChange={(event) => setFile(event.target.files?.[0] ?? null)}
             className="w-full rounded-2xl border border-black/15 bg-white px-4 py-4 text-sm"
           />
-          <p className="text-sm">Use a clean, front-facing monocular video for MVP.</p>
-        </Card>
-
-        <Card className="space-y-4">
-          <h2 className="text-xl font-semibold text-black">2. Select robot</h2>
-          <select
-            className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
-            value={robotModel}
-            onChange={(event) => setRobotModel(event.target.value)}
-          >
-            <option value="unitree-g1">Unitree G1 template</option>
-            <option value="atlas">Atlas template</option>
-            <option value="default-humanoid">Default humanoid</option>
-          </select>
-        </Card>
-
-        <Card className="space-y-4">
-          <h2 className="text-xl font-semibold text-black">3. Select object</h2>
-          <div className="grid gap-3 md:grid-cols-2">
-            <select
-              className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
-              value={objectId}
-              onChange={(event) => setObjectId(event.target.value)}
-            >
-              <option value="cargo_box">Cargo crate (default)</option>
-              <option value="basketball">Basketball</option>
-              <option value="badminton_shuttle">Badminton shuttle</option>
-            </select>
-            <input
-              type="text"
-              placeholder="Or paste mesh URL"
-              className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
-            />
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <input
-              type="number"
-              value={objectPose.x}
-              onChange={(event) => setObjectPose({ ...objectPose, x: event.target.value })}
-              placeholder="Object X"
-              className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
-            />
-            <input
-              type="number"
-              value={objectPose.y}
-              onChange={(event) => setObjectPose({ ...objectPose, y: event.target.value })}
-              placeholder="Object Y"
-              className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
-            />
-            <input
-              type="number"
-              value={objectPose.z}
-              onChange={(event) => setObjectPose({ ...objectPose, z: event.target.value })}
-              placeholder="Object Z"
-              className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
-            />
-            <input
-              type="number"
-              value={objectPose.roll}
-              onChange={(event) => setObjectPose({ ...objectPose, roll: event.target.value })}
-              placeholder="Roll"
-              className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
-            />
-            <input
-              type="number"
-              value={objectPose.pitch}
-              onChange={(event) => setObjectPose({ ...objectPose, pitch: event.target.value })}
-              placeholder="Pitch"
-              className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
-            />
-            <input
-              type="number"
-              value={objectPose.yaw}
-              onChange={(event) => setObjectPose({ ...objectPose, yaw: event.target.value })}
-              placeholder="Yaw"
-              className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
-            />
-          </div>
-        </Card>
-
-        <Card className="space-y-4">
-          <h2 className="text-xl font-semibold text-black">4. Annotate phases</h2>
-          <div className="grid gap-3 md:grid-cols-2">
-            <input
-              type="number"
-              value={tsStart}
-              onChange={(event) => setTsStart(event.target.value)}
-              placeholder="Contact start (ts)"
-              className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
-            />
-            <input
-              type="number"
-              value={tsEnd}
-              onChange={(event) => setTsEnd(event.target.value)}
-              placeholder="Contact end (te)"
-              className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
-            />
-          </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            <select
-              className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
-              value={anchorType}
-              onChange={(event) => setAnchorType(event.target.value)}
-            >
-              <option value="palms_midpoint">Anchor: two palms midpoint</option>
-              <option value="single_body_part">Anchor: single body part</option>
-            </select>
-            <input
-              type="text"
-              value={keyBodies}
-              onChange={(event) => setKeyBodies(event.target.value)}
-              placeholder="Key bodies (comma separated)"
-              className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
-            />
-          </div>
+          <p className="text-sm text-black/70">Use a clean, front-facing monocular video for MVP.</p>
         </Card>
 
         <Card className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-black">5. Run end-to-end</h2>
+            <h2 className="text-xl font-semibold text-black">2. Run</h2>
             <Badge
               label={gpuReady === true ? "GPU worker connected" : gpuReady === false ? "GPU worker offline" : "GPU status unknown"}
               tone={gpuReady === true ? "emerald" : gpuReady === false ? "rose" : "amber"}
@@ -328,7 +204,7 @@ export default function NewDemoPage() {
               logs and follow <code>docs/GVHMR.md</code>.
             </p>
           ) : null}
-          <Button onClick={handleRun}>Run end-to-end</Button>
+          <Button onClick={handleRun}>Generate dataset and policy</Button>
           {status ? <p className="text-sm text-emerald-700">{status}</p> : null}
           {error ? <p className="text-sm text-rose-700">{error}</p> : null}
           {jobId ? (
@@ -337,6 +213,138 @@ export default function NewDemoPage() {
             </Link>
           ) : null}
         </Card>
+
+        <details className="rounded-3xl border border-black/10 bg-white p-6">
+          <summary className="cursor-pointer text-sm font-semibold text-black">Advanced settings (optional)</summary>
+          <div className="mt-6 grid gap-6">
+            <Card className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-black">Project</h2>
+                <Badge label="Required" tone="amber" />
+              </div>
+              <input
+                type="text"
+                value={projectName}
+                onChange={(event) => setProjectName(event.target.value)}
+                className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+              />
+            </Card>
+
+            <Card className="space-y-4">
+              <h2 className="text-xl font-semibold text-black">Robot</h2>
+              <select
+                className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+                value={robotModel}
+                onChange={(event) => setRobotModel(event.target.value)}
+              >
+                <option value="unitree-g1">Unitree G1 template</option>
+                <option value="atlas">Atlas template</option>
+                <option value="default-humanoid">Default humanoid</option>
+              </select>
+            </Card>
+
+            <Card className="space-y-4">
+              <h2 className="text-xl font-semibold text-black">Object</h2>
+              <div className="grid gap-3 md:grid-cols-2">
+                <select
+                  className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+                  value={objectId}
+                  onChange={(event) => setObjectId(event.target.value)}
+                >
+                  <option value="cargo_box">Cargo crate (default)</option>
+                  <option value="basketball">Basketball</option>
+                  <option value="badminton_shuttle">Badminton shuttle</option>
+                </select>
+                <input
+                  type="text"
+                  placeholder="Or paste mesh URL (not wired yet)"
+                  className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+                />
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <input
+                  type="number"
+                  value={objectPose.x}
+                  onChange={(event) => setObjectPose({ ...objectPose, x: event.target.value })}
+                  placeholder="Object X"
+                  className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+                />
+                <input
+                  type="number"
+                  value={objectPose.y}
+                  onChange={(event) => setObjectPose({ ...objectPose, y: event.target.value })}
+                  placeholder="Object Y"
+                  className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+                />
+                <input
+                  type="number"
+                  value={objectPose.z}
+                  onChange={(event) => setObjectPose({ ...objectPose, z: event.target.value })}
+                  placeholder="Object Z"
+                  className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+                />
+                <input
+                  type="number"
+                  value={objectPose.roll}
+                  onChange={(event) => setObjectPose({ ...objectPose, roll: event.target.value })}
+                  placeholder="Roll"
+                  className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+                />
+                <input
+                  type="number"
+                  value={objectPose.pitch}
+                  onChange={(event) => setObjectPose({ ...objectPose, pitch: event.target.value })}
+                  placeholder="Pitch"
+                  className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+                />
+                <input
+                  type="number"
+                  value={objectPose.yaw}
+                  onChange={(event) => setObjectPose({ ...objectPose, yaw: event.target.value })}
+                  placeholder="Yaw"
+                  className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+                />
+              </div>
+            </Card>
+
+            <Card className="space-y-4">
+              <h2 className="text-xl font-semibold text-black">Contact annotation</h2>
+              <div className="grid gap-3 md:grid-cols-2">
+                <input
+                  type="number"
+                  value={tsStart}
+                  onChange={(event) => setTsStart(event.target.value)}
+                  placeholder="Contact start (ts)"
+                  className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+                />
+                <input
+                  type="number"
+                  value={tsEnd}
+                  onChange={(event) => setTsEnd(event.target.value)}
+                  placeholder="Contact end (te)"
+                  className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+                />
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <select
+                  className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+                  value={anchorType}
+                  onChange={(event) => setAnchorType(event.target.value)}
+                >
+                  <option value="palms_midpoint">Anchor: two palms midpoint</option>
+                  <option value="single_body_part">Anchor: single body part</option>
+                </select>
+                <input
+                  type="text"
+                  value={keyBodies}
+                  onChange={(event) => setKeyBodies(event.target.value)}
+                  placeholder="Key bodies (comma separated)"
+                  className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+                />
+              </div>
+            </Card>
+          </div>
+        </details>
       </div>
     </div>
   );
