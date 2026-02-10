@@ -530,8 +530,13 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         "--output_root",
         str(output_root),
     ]
-    # Requires our patched GVHMR demo that supports skipping rendering (avoids pytorch3d renderer dependency).
-    cmd.append("--skip_render")
+    # By default we skip GVHMR's native mesh renderer because `pytorch3d` renderer/structures is
+    # often unavailable on Windows Isaac Sim Python. If you manage to install it, you can enable
+    # the native render videos by setting `GVHMR_NATIVE_RENDER=1` on the GPU worker.
+    enable_native_render = str(os.environ.get("GVHMR_NATIVE_RENDER", "0") or "0").strip().lower() in ("1", "true", "yes")
+    if not enable_native_render:
+        # Requires our patched GVHMR demo that supports skipping rendering (avoids pytorch3d renderer dependency).
+        cmd.append("--skip_render")
     if static_cam:
         cmd.append("-s")
     if use_dpvo:
@@ -581,14 +586,18 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
     npz_path = output_dir / f"{video_path.stem}_gvhmr_smplx.npz"
     np.savez_compressed(npz_path, **payload["smpl_params_global"])
 
-    preview_path = output_dir / f"{video_path.stem}_gvhmr_preview.mp4"
+    rendered_global = results_path.parent / "2_global.mp4"
+    preview_path = rendered_global if rendered_global.exists() else (output_dir / f"{video_path.stem}_gvhmr_preview.mp4")
     preview = None
     preview_error = None
-    try:
-        preview = _render_gvhmr_preview(video_path, results_path, preview_path)
-    except Exception as exc:  # noqa: BLE001
-        preview = None
-        preview_error = f"{type(exc).__name__}: {exc}"
+    if preview_path == rendered_global:
+        preview = {"ok": True, "preview_mp4": str(preview_path), "source": "gvhmr_native_render"}
+    else:
+        try:
+            preview = _render_gvhmr_preview(video_path, results_path, preview_path)
+        except Exception as exc:  # noqa: BLE001
+            preview = None
+            preview_error = f"{type(exc).__name__}: {exc}"
 
     meta = {
         "ok": True,
@@ -598,6 +607,8 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         "gvhmr_log": str(gvhmr_log),
         "preview_mp4": str(preview_path) if preview_path.exists() else None,
         "preview_error": preview_error,
+        "native_render": bool(enable_native_render),
+        "native_render_global_mp4": str(rendered_global) if rendered_global.exists() else None,
         "python_cmd": cmd[:3] if cmd[:2] == ["cmd.exe", "/c"] else cmd[:1],
         "static_cam": bool(static_cam),
         "use_dpvo": bool(use_dpvo),
