@@ -47,6 +47,20 @@ Fastest “do it for me” launch:
 
 2. When it prints your Mac IP, run the printed Windows command on the GPU PC. The Mac script will automatically continue once the GPU worker is detected.
 
+Fastest REAL “do it for me” launch (GVHMR + Isaac Lab PPO):
+
+1. On Mac:
+
+```bash
+# Optional: pass a video path. If omitted, the script uses:
+# - /Users/robertvukosa/Desktop/delivery-man-...mp4 if it exists, else
+# - assets/sample_videos/cargo_pickup_01.mp4
+/Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/mac/run_full_e2e_real.sh
+```
+
+2. When it prints your Mac IP, run the printed Windows command on the GPU PC.
+   - If GVHMR fails, follow `docs/GVHMR.md` to manually place the remaining checkpoints.
+
 ## 1) Web UI: Upload -> XGen -> Dataset
 
 1. Open `http://localhost:3000/auth`

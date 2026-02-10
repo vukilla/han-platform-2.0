@@ -15,6 +15,11 @@ Fastest end-to-end (Mac control-plane + Windows GPU worker):
 2. When it prints your Mac IP, run the printed Windows command:
    - `powershell -ExecutionPolicy Bypass -File .\\scripts\\windows\\one_click_gpu_worker.ps1 -MacIp <MAC_IP> -IsaacSimPath C:\\isaacsim`
 
+Fastest REAL end-to-end (GVHMR + Isaac Lab PPO, requires extra GVHMR checkpoints on Windows):
+1. On Mac: `./scripts/mac/run_full_e2e_real.sh`
+2. When it prints your Mac IP, run the printed Windows command:
+   - `powershell -ExecutionPolicy Bypass -File .\\scripts\\windows\\one_click_gpu_worker_real.ps1 -MacIp <MAC_IP> -IsaacSimPath C:\\isaacsim -SetupGVHMR -DownloadLightCheckpoints`
+
 What to test (golden path):
 - `docs/WHAT_TO_TEST.md`
 
