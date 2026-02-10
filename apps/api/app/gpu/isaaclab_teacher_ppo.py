@@ -94,9 +94,11 @@ def train_teacher_ppo(
     This is intentionally a small, deterministic training loop to produce a *real* checkpoint artifact.
     It is not expected to reach high performance in the default settings.
     """
+    import json
     import os
     import sys
     import time
+    import traceback
 
     import torch
 
@@ -108,6 +110,19 @@ def train_teacher_ppo(
 
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
+    result_path = out_path / "result.json"
+
+    def write_result(payload: dict) -> None:
+        # Write results early and often because Isaac Sim shutdown can terminate the
+        # whole process before callers (e.g. a CLI wrapper) can persist outcomes.
+        result_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    # Seed the result file so the parent process can at least read *something* even
+    # if Kit terminates unexpectedly during shutdown.
+    try:
+        write_result({"ok": False, "stage": "starting", "task": task, "config": cfg.__dict__})
+    except Exception:
+        pass
 
     # Make runs more reproducible.
     os.environ.setdefault("PYTHONHASHSEED", str(cfg.seed))
@@ -275,7 +290,7 @@ def train_teacher_ppo(
 
         wall_s = time.time() - start_time
         log(f"[done] checkpoint={ckpt_path} wall_s={wall_s:.1f}")
-        return {
+        metrics = {
             "checkpoint_path": str(ckpt_path),
             "task": task,
             "obs_dim": obs_dim,
@@ -285,6 +300,23 @@ def train_teacher_ppo(
             "mean_reward": float(last_mean_reward),
             "wall_s": float(wall_s),
         }
+        try:
+            write_result({"ok": True, "metrics": metrics})
+        except Exception:
+            pass
+        return metrics
+    except Exception as exc:
+        try:
+            write_result(
+                {
+                    "ok": False,
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                }
+            )
+        except Exception:
+            pass
+        raise
     finally:
         # best-effort cleanup
         try:
