@@ -80,8 +80,8 @@ This will:
 1. Enter any email, click `Send magic link` (it stores a local JWT)
 1. Open `http://localhost:3000/demos/new`
 1. Pick any `.mp4` (short is fine)
-1. Leave defaults (ts/te, anchor type, robot/object)
-1. Click `Start XGen`
+1. Leave defaults (advanced settings are optional)
+1. Click `Generate dataset and policy`
 1. Click the `View job <id>` link
 1. Wait until the badge shows `COMPLETED`
 1. Click `Open dataset` on the job page
