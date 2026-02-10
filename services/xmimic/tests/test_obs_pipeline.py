@@ -46,22 +46,22 @@ class TestObsConfigs(unittest.TestCase):
         cfg = humanx_student_obs_config(robot, num_skills=5, mode="nep", history=4)
         self.assertEqual(
             [f.name for f in cfg.fields],
-            ["base_ang_vel", "gravity", "dof_pos", "dof_vel", "action", "skill_label"],
+            ["base_ang_vel", "gravity", "dof_pos", "dof_vel", "action", "pd_error", "skill_label"],
         )
         self.assertEqual(
             [f.name for f in cfg.history_fields or []],
             ["base_ang_vel", "gravity", "dof_pos", "dof_vel", "action"],
         )
-        self.assertEqual(cfg.dim, 95)
+        self.assertEqual(cfg.dim, 99)
 
     def test_student_mocap_schema_matches_table_iv(self):
         robot = self._robot()
         cfg = humanx_student_obs_config(robot, num_skills=5, mode="mocap", history=4)
         self.assertEqual(
             [f.name for f in cfg.fields],
-            ["base_ang_vel", "gravity", "dof_pos", "dof_vel", "action", "object_pos", "skill_label"],
+            ["base_ang_vel", "gravity", "dof_pos", "dof_vel", "action", "pd_error", "object_pos", "skill_label"],
         )
-        self.assertEqual(cfg.dim, 98)
+        self.assertEqual(cfg.dim, 102)
 
     def test_pipeline_accepts_common_aliases(self):
         robot = self._robot()

@@ -91,6 +91,39 @@ class TestUnifiedRewards(unittest.TestCase):
         )
         self.assertAlmostEqual(terms["relative_pos"], math.exp(-1.0), places=6)
 
+    def test_relative_pos_derived_time_series_key_body_pos(self):
+        cfg = HumanXRewardConfig(relative_pos=RewardTerm(gamma=1.0, lambda_=1.0), regularization=0.0)
+        # key_body_pos: (T, K, 3), object_pos: (T, 3)
+        key_body = np.array(
+            [
+                [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]],
+                [[0.0, 0.0, 3.0], [0.0, 0.0, 4.0]],
+            ],
+            dtype=np.float32,
+        )
+        obj = np.zeros((2, 3), dtype=np.float32)
+        # squared norms across all time/key bodies: [1,4,9,16], mean = 7.5
+        expected = math.exp(-7.5)
+        terms = compute_reward_terms(
+            obs={"key_body_pos": key_body, "object_pos": obj},
+            targets={"key_body_pos": np.zeros_like(key_body), "object_pos": obj},
+            config=cfg,
+        )
+        self.assertAlmostEqual(terms["relative_pos"], expected, places=6)
+
+    def test_contact_reward_weighted_abs_time_series(self):
+        cfg = HumanXRewardConfig(
+            contact=RewardTerm(gamma=1.0, lambda_=1.0),
+            contact_weights=[1.0, 2.0, 3.0],
+            regularization=0.0,
+        )
+        scg = np.array([[1.0, 0.0, 1.0], [0.0, 0.0, 1.0]], dtype=np.float32)
+        shat = np.array([[1.0, 1.0, 0.0], [0.0, 0.0, 0.0]], dtype=np.float32)
+        # per frame weighted sums: [5, 3], mean = 4
+        expected = math.exp(-4.0)
+        terms = compute_reward_terms(obs={"contact": scg}, targets={"contact": shat}, config=cfg)
+        self.assertAlmostEqual(terms["contact"], expected, places=6)
+
     def test_regularization_additional_table_iv_terms(self):
         cfg = HumanXRewardConfig(
             regularization=0.5,

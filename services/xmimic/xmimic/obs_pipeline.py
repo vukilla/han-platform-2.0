@@ -225,6 +225,8 @@ def humanx_student_obs_config(
     num_skills: int = 10,
     mode: str = "nep",  # "nep" or "mocap"
     include_object_rot: bool = False,
+    include_target_object_pos: bool = False,
+    include_target_object_rot: bool = False,
     mocap_dropout_mask: bool = False,
     history: int = 4,
     normalize: bool = True,
@@ -238,6 +240,8 @@ def humanx_student_obs_config(
         ObsField("dof_pos", dof),
         ObsField("dof_vel", dof),
         ObsField("action", dof),
+        # Table IV includes a PD error term for both teacher and student.
+        ObsField("pd_error", dof),
     ]
 
     if mode not in ("nep", "mocap"):
@@ -250,6 +254,11 @@ def humanx_student_obs_config(
         if mocap_dropout_mask:
             # Not shown in Table IV; keep as an opt-in debugging hook.
             fields.append(ObsField("object_valid", 1))
+
+    if include_target_object_pos:
+        fields.append(ObsField("target_object_pos", 3))
+    if include_target_object_rot:
+        fields.append(ObsField("target_object_rot", 4))
 
     fields.append(ObsField("skill_label", num_skills))
 

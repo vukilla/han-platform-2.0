@@ -37,7 +37,7 @@ Teacher (`pi_tea`) vs Student (`pi_stu`) parity, line-by-line:
 - `dof_pos`: teacher yes, student yes
 - `dof_vel`: teacher yes, student yes
 - `action`: teacher yes, student yes
-- `pd_error`: teacher yes, student no
+- `pd_error`: teacher yes, student yes
 - `ref_body_pos`: teacher yes, student no
 - `delta_body_pos`: teacher yes, student no
 - `object_pos`: teacher yes, student optional (`*`)
@@ -77,8 +77,8 @@ Exact ordering is enforced by unit tests (`services/xmimic/tests/test_obs_pipeli
 
 For `services/xmimic/configs/robot_spec.yaml` (DoF=24, key bodies=5), the observation dimensions are:
 - Teacher: `135 + 78 * history` (+4 if `object_rot` is enabled; +3/+4 for target object pose)
-- Student NEP: `(78 + num_skills) + 78 * history`
-- Student MoCap: `(81 + num_skills) + 78 * history` (+4 if `object_rot` is enabled)
+- Student NEP: `(102 + num_skills) + 78 * history`
+- Student MoCap: `(105 + num_skills) + 78 * history` (+4 if `object_rot` is enabled)
 
 ## Rewards (Table IV)
 
