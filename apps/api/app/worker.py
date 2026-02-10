@@ -1,5 +1,10 @@
 import io
 import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import zipfile
 from datetime import datetime
 from time import sleep
@@ -11,7 +16,7 @@ from kombu import Queue
 
 from app.core.config import get_settings
 from app.core.alerts import send_alert
-from app.core.storage import upload_bytes, upload_text
+from app.core.storage import download_file, upload_bytes, upload_file, upload_text
 from app import crud
 from app.quality import evaluate_demo, evaluate_clip
 from app.db import SessionLocal
@@ -168,6 +173,63 @@ def _ensure_dataset_for_xgen_job(db, job: models.XGenJob) -> models.Dataset:
     return dataset
 
 
+def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params: dict) -> dict:
+    """Run GVHMR pose estimation on the local machine and upload artifacts to object storage.
+
+    NOTE: GVHMR is GPU-heavy and requires extra Python deps. This function is intended to run
+    on the Windows GPU worker (Isaac Sim Python).
+    """
+    tmp_root = Path(tempfile.mkdtemp(prefix=f"gvhmr_{demo_id}_{job_id}_"))
+    local_video = tmp_root / "input.mp4"
+    download_file(video_uri, local_video)
+
+    out_dir = tmp_root / "out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    static_cam = bool(params.get("gvhmr_static_cam", True))
+    use_dpvo = bool(params.get("gvhmr_use_dpvo", False))
+    f_mm = params.get("gvhmr_f_mm", None)
+
+    cmd = [
+        os.environ.get("GVHMR_PYTHON", sys.executable),
+        "-m",
+        "app.gpu.gvhmr_runner",
+        "--video",
+        str(local_video),
+        "--output-dir",
+        str(out_dir),
+    ]
+    if static_cam:
+        cmd.append("--static-cam")
+    if use_dpvo:
+        cmd.append("--use-dpvo")
+    if f_mm is not None:
+        cmd.extend(["--f-mm", str(int(f_mm))])
+
+    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    payload = json.loads((result.stdout or "").strip() or "{}")
+    npz_path = Path(payload["npz_path"])
+    meta_path = Path(payload["meta_path"])
+    gvhmr_log_path = Path(payload.get("gvhmr_log_path", "")) if payload.get("gvhmr_log_path") else None
+
+    pose_npz_key = f"demos/{demo_id}/poses/{job_id}/gvhmr_smplx.npz"
+    pose_meta_key = f"demos/{demo_id}/poses/{job_id}/gvhmr_meta.json"
+    pose_log_key = f"demos/{demo_id}/poses/{job_id}/gvhmr.log"
+
+    upload_file(pose_npz_key, npz_path, content_type="application/octet-stream")
+    upload_file(pose_meta_key, meta_path, content_type="application/json")
+    if gvhmr_log_path and gvhmr_log_path.exists():
+        upload_file(pose_log_key, gvhmr_log_path, content_type="text/plain")
+
+    return {
+        "pose_estimator": "gvhmr",
+        "pose_smplx_npz_uri": pose_npz_key,
+        "pose_meta_uri": pose_meta_key,
+        "pose_log_uri": pose_log_key if gvhmr_log_path and gvhmr_log_path.exists() else None,
+        "pose_ok": True,
+    }
+
+
 @celery_app.task(bind=True, max_retries=3, retry_backoff=True)
 def run_xgen_job(self, job_id: str):
     db = SessionLocal()
@@ -178,14 +240,42 @@ def run_xgen_job(self, job_id: str):
         if not job:
             return
         dataset = _ensure_dataset_for_xgen_job(db, job)
+        params = dict(job.params_json or {})
         for stage in XGEN_STAGES:
             _update_job_status(db, job, stage)
             log_lines.append(f"{datetime.utcnow().isoformat()}Z stage={stage}")
             sleep(0.5)
+            if stage == "ESTIMATE_POSE":
+                # Default behavior is a placeholder (platform plumbing). Real pose extraction is opt-in.
+                placeholder_pose = bool(params.get("placeholder_pose", False))
+                estimator = str(params.get("pose_estimator", "none") or "none").lower()
+                if placeholder_pose:
+                    params["pose_ok"] = True
+                    params["pose_estimator"] = "placeholder"
+                    log_lines.append(f"{datetime.utcnow().isoformat()}Z pose=placeholder")
+                elif estimator == "gvhmr":
+                    log_lines.append(f"{datetime.utcnow().isoformat()}Z pose=gvhmr starting")
+                    pose_artifacts = _run_gvhmr_pose_estimation(
+                        demo_id=str(job.demo_id),
+                        job_id=str(job.id),
+                        video_uri=job.demo.video_uri,
+                        params=params,
+                    )
+                    params.update(pose_artifacts)
+                    log_lines.append(
+                        f"{datetime.utcnow().isoformat()}Z pose=gvhmr ok npz={pose_artifacts.get('pose_smplx_npz_uri')}"
+                    )
+                else:
+                    params["pose_ok"] = True
+                    params["pose_estimator"] = "none"
+                    log_lines.append(f"{datetime.utcnow().isoformat()}Z pose=skipped")
+
+                job.params_json = params
+                db.add(job)
+                db.commit()
             if stage == "EXPORT_DATASET":
                 existing = crud.list_dataset_clips(db, dataset.id)
                 if not existing:
-                    params = dict(job.params_json or {})
                     frames = int(params.get("frames", 60))
                     nq = int(params.get("nq", 24))
                     contact_dim = int(params.get("contact_dim", 5))
@@ -297,43 +387,226 @@ def run_xmimic_job(self, job_id: str):
         job = db.query(models.XMimicJob).filter(models.XMimicJob.id == job_id).first()
         if not job:
             return
+        params = dict(job.params_json or {})
+        backend = str(params.get("backend", "synthetic") or "synthetic").lower()
+        env_task = str(params.get("env_task", "cargo_pickup_v0") or "cargo_pickup_v0")
+
+        # Default is synthetic artifact generation for platform plumbing.
+        isaaclab_metrics = None
+        physhoi_metrics = None
         for stage in XMIMIC_STAGES:
             _update_job_status(db, job, stage)
             log_lines.append(f"{datetime.utcnow().isoformat()}Z stage={stage}")
             sleep(0.5)
+            if backend == "isaaclab_teacher_ppo" and stage == "TRAIN_TEACHER":
+                log_lines.append(f"{datetime.utcnow().isoformat()}Z backend=isaaclab_teacher_ppo starting")
+                try:
+                    from app.gpu.isaaclab_teacher_ppo import IsaacLabTeacherPPOConfig, train_teacher_ppo
+                except Exception as exc:
+                    raise RuntimeError(
+                        "Isaac Lab training backend requested but imports failed. "
+                        "Ensure the Windows GPU worker is bootstrapped with Isaac Sim + Isaac Lab and is running Celery "
+                        "from Isaac Sim python."
+                    ) from exc
+
+                tmp_out = Path(tempfile.mkdtemp(prefix=f"xmimic_{job_id}_"))
+                cfg = IsaacLabTeacherPPOConfig(
+                    task=str(params.get("isaaclab_task", "cargo_pickup_franka") or "cargo_pickup_franka"),
+                    device=str(params.get("device", "cuda:0") or "cuda:0"),
+                    num_envs=int(params.get("num_envs", 64)),
+                    seed=int(params.get("seed", 0)),
+                    rollout_steps=int(params.get("rollout_steps", 128)),
+                    updates=int(params.get("updates", 10)),
+                    gamma=float(params.get("gamma", 0.99)),
+                    gae_lambda=float(params.get("gae_lambda", 0.95)),
+                    clip_range=float(params.get("clip_range", 0.2)),
+                    lr=float(params.get("lr", 3e-4)),
+                    epochs=int(params.get("epochs", 4)),
+                )
+
+                def _log_cb(msg: str) -> None:
+                    log_lines.append(f"{datetime.utcnow().isoformat()}Z {msg}")
+
+                isaaclab_metrics = train_teacher_ppo(cfg, out_dir=tmp_out, log_cb=_log_cb)
+                params["backend"] = backend
+                params["isaaclab_metrics"] = isaaclab_metrics
+                job.params_json = params
+                db.add(job)
+                db.commit()
+                log_lines.append(f"{datetime.utcnow().isoformat()}Z backend=isaaclab_teacher_ppo done")
+            if backend == "physhoi_inference" and stage == "EVAL_POLICY":
+                log_lines.append(f"{datetime.utcnow().isoformat()}Z backend=physhoi_inference starting")
+                from app.gpu.physhoi_inference import run_physhoi_inference
+
+                tmp_out = Path(tempfile.mkdtemp(prefix=f"physhoi_{job_id}_"))
+                tmp_out.mkdir(parents=True, exist_ok=True)
+
+                motion_local = None
+                ckpt_local = None
+
+                motion_path = params.get("physhoi_motion_path")
+                ckpt_path = params.get("physhoi_checkpoint_path")
+                motion_uri = params.get("physhoi_motion_uri")
+                ckpt_uri = params.get("physhoi_checkpoint_uri")
+
+                if motion_path:
+                    motion_local = Path(str(motion_path)).expanduser().resolve()
+                elif motion_uri:
+                    motion_local = tmp_out / "motion.pt"
+                    download_file(str(motion_uri), motion_local)
+
+                if ckpt_path:
+                    ckpt_local = Path(str(ckpt_path)).expanduser().resolve()
+                elif ckpt_uri:
+                    ckpt_local = tmp_out / "checkpoint.pth"
+                    download_file(str(ckpt_uri), ckpt_local)
+
+                if not motion_local or not motion_local.exists():
+                    raise RuntimeError(
+                        "PhysHOI backend requires a motion file. Provide params_json.physhoi_motion_path "
+                        "(local path) or params_json.physhoi_motion_uri (s3 key/uri)."
+                    )
+                if not ckpt_local or not ckpt_local.exists():
+                    raise RuntimeError(
+                        "PhysHOI backend requires a checkpoint. Provide params_json.physhoi_checkpoint_path "
+                        "(local path) or params_json.physhoi_checkpoint_uri (s3 key/uri)."
+                    )
+
+                physhoi_metrics = run_physhoi_inference(
+                    motion_file=motion_local,
+                    checkpoint=ckpt_local,
+                    out_dir=tmp_out,
+                    num_envs=int(params.get("num_envs", 16)),
+                    task=str(params.get("physhoi_task", "PhysHOI_BallPlay") or "PhysHOI_BallPlay"),
+                    extra_args=list(params.get("physhoi_extra_args", [])) if params.get("physhoi_extra_args") else None,
+                )
+
+                params["backend"] = backend
+                params["physhoi_metrics"] = physhoi_metrics
+                job.params_json = params
+                db.add(job)
+                db.commit()
+                log_lines.append(f"{datetime.utcnow().isoformat()}Z backend=physhoi_inference done")
         _update_job_status(db, job, "COMPLETED")
         log_lines.append(f"{datetime.utcnow().isoformat()}Z status=COMPLETED")
         try:
-            checkpoint = {
-                "synthetic": True,
-                "xmimic_job_id": str(job.id),
-                "dataset_id": str(job.dataset_id),
-                "mode": job.mode,
-                "created_at": datetime.utcnow().isoformat() + "Z",
-            }
-            ckpt_key = f"policies/{job.id}/checkpoint.json"
-            upload_bytes(
-                ckpt_key,
-                json.dumps(checkpoint, indent=2).encode("utf-8"),
-                content_type="application/json",
-            )
-            policy = crud.create_policy(
-                db,
-                job.id,
-                checkpoint_uri=ckpt_key,
-                metadata_json={"mode": job.mode, "synthetic": True},
-            )
-            crud.create_eval_run(
-                db,
-                policy.id,
-                env_task="cargo_pickup_v0",
-                sr=0.0,
-                gsr=0.0,
-                eo=None,
-                eh=None,
-                report_uri=None,
-                videos_uri=None,
-            )
+            if backend == "isaaclab_teacher_ppo" and isaaclab_metrics:
+                ckpt_path = Path(isaaclab_metrics["checkpoint_path"])
+                ckpt_key = f"policies/{job.id}/checkpoint.pt"
+                upload_file(ckpt_key, ckpt_path, content_type="application/octet-stream")
+
+                report = {
+                    "backend": backend,
+                    "xmimic_job_id": str(job.id),
+                    "dataset_id": str(job.dataset_id),
+                    "mode": job.mode,
+                    "env_task": env_task,
+                    "metrics": isaaclab_metrics,
+                    "created_at": datetime.utcnow().isoformat() + "Z",
+                }
+                report_key = f"policies/{job.id}/eval_report.json"
+                upload_bytes(report_key, json.dumps(report, indent=2).encode("utf-8"), content_type="application/json")
+
+                policy = crud.create_policy(
+                    db,
+                    job.id,
+                    checkpoint_uri=ckpt_key,
+                    metadata_json={"mode": job.mode, "backend": backend, "metrics": isaaclab_metrics},
+                )
+                crud.create_eval_run(
+                    db,
+                    policy.id,
+                    env_task=env_task,
+                    sr=None,
+                    gsr=None,
+                    eo=None,
+                    eh=None,
+                    report_uri=report_key,
+                    videos_uri=None,
+                )
+            elif backend == "physhoi_inference" and physhoi_metrics:
+                # Best-effort: upload the inference log and the referenced checkpoint file (if local).
+                log_path = Path(str(physhoi_metrics.get("log_path", "")))
+                if log_path.exists():
+                    log_key = f"policies/{job.id}/physhoi_inference.log"
+                    upload_file(log_key, log_path, content_type="text/plain")
+
+                # If the caller used a local checkpoint path, mirror it into storage for reproducibility.
+                ckpt_local_path = params.get("physhoi_checkpoint_path")
+                if ckpt_local_path:
+                    try:
+                        ckpt_p = Path(str(ckpt_local_path)).expanduser().resolve()
+                        if ckpt_p.exists():
+                            ckpt_key = f"policies/{job.id}/checkpoint.pth"
+                            upload_file(ckpt_key, ckpt_p, content_type="application/octet-stream")
+                        else:
+                            ckpt_key = None
+                    except Exception:
+                        ckpt_key = None
+                else:
+                    # If it came from storage already, re-use that pointer.
+                    ckpt_key = str(params.get("physhoi_checkpoint_uri") or "")
+
+                report = {
+                    "backend": backend,
+                    "xmimic_job_id": str(job.id),
+                    "dataset_id": str(job.dataset_id),
+                    "mode": job.mode,
+                    "env_task": env_task,
+                    "metrics": physhoi_metrics,
+                    "created_at": datetime.utcnow().isoformat() + "Z",
+                }
+                report_key = f"policies/{job.id}/eval_report.json"
+                upload_bytes(report_key, json.dumps(report, indent=2).encode("utf-8"), content_type="application/json")
+
+                policy = crud.create_policy(
+                    db,
+                    job.id,
+                    checkpoint_uri=ckpt_key or None,
+                    metadata_json={"mode": job.mode, "backend": backend, "metrics": physhoi_metrics},
+                )
+                crud.create_eval_run(
+                    db,
+                    policy.id,
+                    env_task=env_task,
+                    sr=None,
+                    gsr=None,
+                    eo=None,
+                    eh=None,
+                    report_uri=report_key,
+                    videos_uri=None,
+                )
+            else:
+                checkpoint = {
+                    "synthetic": True,
+                    "xmimic_job_id": str(job.id),
+                    "dataset_id": str(job.dataset_id),
+                    "mode": job.mode,
+                    "created_at": datetime.utcnow().isoformat() + "Z",
+                }
+                ckpt_key = f"policies/{job.id}/checkpoint.json"
+                upload_bytes(
+                    ckpt_key,
+                    json.dumps(checkpoint, indent=2).encode("utf-8"),
+                    content_type="application/json",
+                )
+                policy = crud.create_policy(
+                    db,
+                    job.id,
+                    checkpoint_uri=ckpt_key,
+                    metadata_json={"mode": job.mode, "synthetic": True},
+                )
+                crud.create_eval_run(
+                    db,
+                    policy.id,
+                    env_task="cargo_pickup_v0",
+                    sr=0.0,
+                    gsr=0.0,
+                    eo=None,
+                    eh=None,
+                    report_uri=None,
+                    videos_uri=None,
+                )
         except Exception:
             pass
         try:

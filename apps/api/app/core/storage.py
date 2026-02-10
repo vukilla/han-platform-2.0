@@ -7,6 +7,16 @@ from botocore.exceptions import ClientError
 from app.core.config import get_settings
 
 
+def _normalize_key(uri: str) -> str:
+    """Return an object-storage key from either a raw key or an s3:// URI."""
+    if uri.startswith("s3://"):
+        rest = uri[len("s3://") :]
+        parts = rest.split("/", 1)
+        if len(parts) == 2:
+            return parts[1]
+    return uri
+
+
 def get_s3_client(*, endpoint_url: str | None = None):
     settings = get_settings()
     return boto3.client(
@@ -67,3 +77,32 @@ def upload_file(key: str, path: str | Path, content_type: str = "application/oct
     """Upload a file from disk to object storage and return the storage key."""
     data = Path(path).read_bytes()
     return upload_bytes(key, data, content_type=content_type)
+
+
+def download_bytes(key_or_uri: str) -> bytes:
+    """Download an object from storage and return its bytes."""
+    settings = get_settings()
+    key = _normalize_key(key_or_uri)
+    client = get_s3_client()
+    resp = client.get_object(Bucket=settings.s3_bucket, Key=key)
+    return resp["Body"].read()
+
+
+def download_file(key_or_uri: str, dest_path: str | Path) -> Path:
+    """Download an object from storage to a local file path."""
+    dest = Path(dest_path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(download_bytes(key_or_uri))
+    return dest
+
+
+def object_exists(key_or_uri: str) -> bool:
+    """Return True if the object exists in storage."""
+    settings = get_settings()
+    key = _normalize_key(key_or_uri)
+    client = get_s3_client()
+    try:
+        client.head_object(Bucket=settings.s3_bucket, Key=key)
+        return True
+    except ClientError:
+        return False

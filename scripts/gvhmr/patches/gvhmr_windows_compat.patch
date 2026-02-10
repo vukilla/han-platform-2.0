@@ -1,0 +1,120 @@
+diff --git a/hmr4d/utils/preproc/__init__.py b/hmr4d/utils/preproc/__init__.py
+index 6ef3897..55c80e8 100644
+--- a/hmr4d/utils/preproc/__init__.py
++++ b/hmr4d/utils/preproc/__init__.py
+@@ -1,7 +1,11 @@
+ from hmr4d.utils.preproc.tracker import Tracker
+ from hmr4d.utils.preproc.vitfeat_extractor import Extractor
+ from hmr4d.utils.preproc.vitpose import VitPoseExtractor
+-from hmr4d.utils.preproc.relpose.simple_vo import SimpleVO
++try:
++    # SimpleVO depends on pycolmap, which may not be available on Windows.
++    from hmr4d.utils.preproc.relpose.simple_vo import SimpleVO  # type: ignore
++except Exception:  # pragma: no cover
++    SimpleVO = None  # type: ignore
+ 
+ try:
+     from hmr4d.utils.preproc.slam import SLAMModel
+diff --git a/hmr4d/utils/wis3d_utils.py b/hmr4d/utils/wis3d_utils.py
+index df54d8b..78caa92 100644
+--- a/hmr4d/utils/wis3d_utils.py
++++ b/hmr4d/utils/wis3d_utils.py
+@@ -1,4 +1,7 @@
+-from wis3d import Wis3D
++try:
++    from wis3d import Wis3D  # type: ignore
++except Exception:  # pragma: no cover
++    Wis3D = None  # type: ignore
+ from pathlib import Path
+ from datetime import datetime
+ import torch
+@@ -19,6 +22,10 @@ def make_wis3d(output_dir="outputs/wis3d", name="debug", time_postfix=False):
+         time_str = datetime.now().strftime("%m%d-%H%M-%S")
+         name = f"{name}_{time_str}"
+         print(f"Creating Wis3D {name}")
++    if Wis3D is None:
++        raise ImportError(
++            "wis3d is not installed. Install it or avoid calling make_wis3d() in headless/Windows runs."
++        )
+     wis3d = Wis3D(output_dir.absolute(), name)
+     return wis3d
+ 
+diff --git a/tools/demo/demo.py b/tools/demo/demo.py
+index a10fb64..b46afb5 100644
+--- a/tools/demo/demo.py
++++ b/tools/demo/demo.py
+@@ -27,7 +27,6 @@ from hmr4d.utils.geo_transform import compute_cam_angvel
+ from hmr4d.model.gvhmr.gvhmr_pl_demo import DemoPL
+ from hmr4d.utils.net_utils import detach_to_cpu, to_cuda
+ from hmr4d.utils.smplx_utils import make_smplx
+-from hmr4d.utils.vis.renderer import Renderer, get_global_cameras_static, get_ground_params_from_points
+ from tqdm import tqdm
+ from hmr4d.utils.geo_transform import apply_T_on_points, compute_T_ayfz2ay
+ from einops import einsum, rearrange
+@@ -52,6 +51,11 @@ def parse_args_to_cfg():
+         "If the camera zoom in a lot, you can try 135, 200 or even larger values.",
+     )
+     parser.add_argument("--verbose", action="store_true", help="If true, draw intermediate results")
++    parser.add_argument(
++        "--skip_render",
++        action="store_true",
++        help="Skip rendering videos. Useful for headless inference and Windows environments without PyTorch3D renderer.",
++    )
+     args = parser.parse_args()
+ 
+     # Input
+@@ -92,7 +96,7 @@ def parse_args_to_cfg():
+         writer.close()
+         reader.close()
+ 
+-    return cfg
++    return cfg, args
+ 
+ 
+ @torch.no_grad()
+@@ -201,6 +205,9 @@ def load_data_dict(cfg):
+ 
+ 
+ def render_incam(cfg):
++    # Import renderer lazily so environments without pytorch3d.renderer can still run inference.
++    from hmr4d.utils.vis.renderer import Renderer
++
+     incam_video_path = Path(cfg.paths.incam_video)
+     if incam_video_path.exists():
+         Log.info(f"[Render Incam] Video already exists at {incam_video_path}")
+@@ -243,6 +250,9 @@ def render_incam(cfg):
+ 
+ 
+ def render_global(cfg):
++    # Import renderer lazily so environments without pytorch3d.renderer can still run inference.
++    from hmr4d.utils.vis.renderer import Renderer, get_global_cameras_static, get_ground_params_from_points
++
+     global_video_path = Path(cfg.paths.global_video)
+     if global_video_path.exists():
+         Log.info(f"[Render Global] Video already exists at {global_video_path}")
+@@ -304,7 +314,7 @@ def render_global(cfg):
+ 
+ 
+ if __name__ == "__main__":
+-    cfg = parse_args_to_cfg()
++    cfg, args = parse_args_to_cfg()
+     paths = cfg.paths
+     Log.info(f"[GPU]: {torch.cuda.get_device_name()}")
+     Log.info(f'[GPU]: {torch.cuda.get_device_properties("cuda")}')
+@@ -327,8 +337,11 @@ if __name__ == "__main__":
+         torch.save(pred, paths.hmr4d_results)
+ 
+     # ===== Render ===== #
+-    render_incam(cfg)
+-    render_global(cfg)
+-    if not Path(paths.incam_global_horiz_video).exists():
+-        Log.info("[Merge Videos]")
+-        merge_videos_horizontal([paths.incam_video, paths.global_video], paths.incam_global_horiz_video)
++    if args.skip_render:
++        Log.info("[Render] Skipping rendering (--skip_render).")
++    else:
++        render_incam(cfg)
++        render_global(cfg)
++        if not Path(paths.incam_global_horiz_video).exists():
++            Log.info("[Merge Videos]")
++            merge_videos_horizontal([paths.incam_video, paths.global_video], paths.incam_global_horiz_video)

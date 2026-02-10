@@ -5,7 +5,11 @@
 - API health check passes: `GET http://localhost:8000/health`
 - Web dev server loads (fixed linux native deps by isolating container `node_modules` volume)
 - Large external artifacts live inside the repo under `external/humanoid-projects/` (no separate `~/humanoid-projects` required on laptop)
-- GPU-blocked work remains for Windows-native Isaac Sim/Isaac Lab runs (GPU PC) and GVHMR demo execution
+- Windows GPU worker (Isaac Sim + Isaac Lab) can now run:
+  - Real XGen pose extraction via GVHMR (video -> SMPL-X NPZ), uploaded to MinIO
+  - Real PPO teacher checkpoint generation via Isaac Lab (Franka cube lift as the current "cargo pickup" baseline), uploaded to MinIO
+  - `scripts/smoke_e2e_with_gpu_real.sh` runs XGen(GVHMR) + XMimic(IsaacLab PPO) end-to-end
+- PhysHOI baseline inference hook exists as an optional backend, but is Linux-first (not Windows)
 - Added golden-path runbook + UI affordances for testing:
   - `docs/WHAT_TO_TEST.md`
   - `/datasets` index page

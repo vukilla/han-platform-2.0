@@ -1,0 +1,30 @@
+# Minimal deps to run GVHMR demo on Windows inside Isaac Sim Python.
+#
+# Important:
+# - Do NOT pin torch/torchvision here. Isaac Sim / Isaac Lab ship their own CUDA builds.
+# - PyTorch3D is intentionally NOT installed (Linux-only wheels). We patch GVHMR to support
+#   `--skip_render` and provide a small `pytorch3d` stub for the APIs GVHMR uses.
+#
+# If an install fails due to path length, move the repo to a short path:
+#   C:\src\han-platform-2.0
+
+pytorch-lightning==2.3.0
+hydra-core==1.3.2
+rich
+tqdm
+einops
+timm==0.9.12
+
+opencv-python
+ffmpeg-python
+scikit-image
+termcolor
+imageio==2.34.1
+av==13.0.0
+joblib
+
+trimesh
+chumpy
+smplx
+
+ultralytics==8.2.42

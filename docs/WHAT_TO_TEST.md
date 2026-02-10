@@ -26,6 +26,15 @@ Optional one-command smoke tests:
 
 # Full golden path including GPU-queue XMimic (requires Windows GPU worker running)
 /Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/smoke_e2e_with_gpu.sh
+
+# REAL GPU golden path:
+# - XGen on GPU queue with GVHMR pose extraction (video -> SMPL-X NPZ, uploaded to MinIO)
+# - XMimic on GPU queue with Isaac Lab teacher PPO (exports .pt checkpoint, uploaded to MinIO)
+#
+# Requires:
+# - Windows GPU worker running
+# - GVHMR bootstrapped on Windows (see docs/GVHMR.md)
+/Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/smoke_e2e_with_gpu_real.sh
 ```
 
 Fastest “do it for me” launch:
@@ -78,8 +87,12 @@ This step requires a running GPU worker connected to the same Redis/MinIO as the
 What “success” means here (current state):
 
 1. XMimic stages complete and logs are uploaded.
-1. A policy record exists and exposes a downloadable checkpoint artifact (currently synthetic `checkpoint.json`).
-1. An eval run record exists and renders in the UI (metrics are placeholders until Isaac Lab training is wired).
+1. A policy record exists and exposes a downloadable checkpoint artifact:
+   - Default: synthetic `checkpoint.json` (platform plumbing)
+   - Real mode: Isaac Lab teacher PPO exports `checkpoint.pt` (use `scripts/smoke_e2e_with_gpu_real.sh`)
+1. An eval run record exists and renders in the UI:
+   - Default: placeholder metrics
+   - Real mode: an eval report JSON is stored and linked from the policy (still not SR/GSR/Eo/Eh parity yet)
 
 ## 3) Admin: Quality Review -> Points
 
