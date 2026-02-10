@@ -19,6 +19,7 @@ set -euo pipefail
 # - REAL_WORKER=1 (use one_click_gpu_worker_real.ps1)
 # - SETUP_GVHMR=1 (only when REAL_WORKER=1)
 # - DOWNLOAD_LIGHT=1 (only when REAL_WORKER=1)
+# - WORKER_QUEUES (optional: "pose", "gpu", or "pose,gpu")
 # - MAC_LAN_IP (override autodetected)
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -48,6 +49,7 @@ ISAACSIM_PATH="${ISAACSIM_PATH:-C:\\isaacsim}"
 REAL_WORKER="${REAL_WORKER:-0}"
 SETUP_GVHMR="${SETUP_GVHMR:-0}"
 DOWNLOAD_LIGHT="${DOWNLOAD_LIGHT:-0}"
+WORKER_QUEUES="${WORKER_QUEUES:-}"
 
 if [[ "$REAL_WORKER" == "1" ]]; then
   PS1_REL="scripts\\windows\\one_click_gpu_worker_real.ps1"
@@ -71,10 +73,17 @@ echo "Windows IP: $WINDOWS_IP"
 echo "Mac IP:     $MAC_IP"
 echo "SSH user:   $SSH_USER"
 echo "PS1:        $PS1_PATH"
+if [[ -n "$WORKER_QUEUES" ]]; then
+  echo "Queues:     $WORKER_QUEUES"
+fi
 echo ""
 
-REMOTE_CMD="& { git -C '${WINDOWS_REPO}' pull | Out-Host; & '${PS1_PATH}' -MacIp '${MAC_IP}' -IsaacSimPath '${ISAACSIM_PATH}'${EXTRA_ARGS} }"
+QUEUES_ARG=""
+if [[ -n "$WORKER_QUEUES" ]]; then
+  QUEUES_ARG=" -Queues '${WORKER_QUEUES}'"
+fi
+
+REMOTE_CMD="& { git -C '${WINDOWS_REPO}' pull | Out-Host; & '${PS1_PATH}' -MacIp '${MAC_IP}' -IsaacSimPath '${ISAACSIM_PATH}'${QUEUES_ARG}${EXTRA_ARGS} }"
 
 ssh -i "$SSH_KEY" -o IdentitiesOnly=yes -o PreferredAuthentications=publickey "${SSH_USER}@${WINDOWS_IP}" \
   "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$REMOTE_CMD\""
-

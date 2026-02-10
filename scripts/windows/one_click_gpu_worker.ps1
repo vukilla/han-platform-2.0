@@ -74,7 +74,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File $startDetached -MacIp $MacIp
 Write-Host ""
 Write-Host "Next (Mac):" -ForegroundColor Green
 if ($Queues.ToLower().Contains("pose") -and -not $Queues.ToLower().Contains("gpu")) {
-  Write-Host "  Open: http://localhost:3000/gvhmr"
+  Write-Host "  Open: http://localhost:3000/studio"
   Write-Host "  Upload a video and click Run."
 } else {
   Write-Host "  Run the full smoke test:"
