@@ -50,7 +50,16 @@ def _presign_params_json(params_json: dict[str, Any] | None) -> dict[str, Any] |
     if not params_json:
         return params_json
     params = dict(params_json)
-    for key in ("pose_smplx_npz_uri", "pose_meta_uri", "pose_log_uri", "pose_preview_mp4_uri"):
+    for key in (
+        "pose_smplx_npz_uri",
+        "pose_meta_uri",
+        "pose_log_uri",
+        "pose_preview_mp4_uri",
+        "pose_preview_incam_mp4_uri",
+        "pose_preview_global_front_mp4_uri",
+        "pose_preview_global_side_mp4_uri",
+        "pose_input_norm_mp4_uri",
+    ):
         val = params.get(key)
         if isinstance(val, str) and val:
             params[key] = _presign_maybe(val)

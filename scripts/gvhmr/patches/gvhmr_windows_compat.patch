@@ -272,7 +272,7 @@ index df54d8b..78caa92 100644
      return wis3d
  
 diff --git a/tools/demo/demo.py b/tools/demo/demo.py
-index a10fb64..1f8965f 100644
+index a10fb64..be3bb85 100644
 --- a/tools/demo/demo.py
 +++ b/tools/demo/demo.py
 @@ -3,6 +3,7 @@ import torch
@@ -291,7 +291,7 @@ index a10fb64..1f8965f 100644
  from tqdm import tqdm
  from hmr4d.utils.geo_transform import apply_T_on_points, compute_T_ayfz2ay
  from einops import einsum, rearrange
-@@ -36,6 +36,22 @@ from einops import einsum, rearrange
+@@ -36,6 +36,28 @@ from einops import einsum, rearrange
  CRF = 23  # 17 is lossless, every +6 halves the mp4 size
  
  
@@ -311,10 +311,16 @@ index a10fb64..1f8965f 100644
 +    return val in ("1", "true", "yes")
 +
 +
++def _should_render_extra_views() -> bool:
++    # Render extra global views (e.g. front/side) so the UI can switch camera perspectives.
++    val = str(os.environ.get("GVHMR_RENDER_EXTRA_VIEWS", "0") or "0").strip().lower()
++    return val in ("1", "true", "yes")
++
++
  def parse_args_to_cfg():
      # Put all args to cfg
      parser = argparse.ArgumentParser()
-@@ -52,6 +68,11 @@ def parse_args_to_cfg():
+@@ -52,6 +74,11 @@ def parse_args_to_cfg():
          "If the camera zoom in a lot, you can try 135, 200 or even larger values.",
      )
      parser.add_argument("--verbose", action="store_true", help="If true, draw intermediate results")
@@ -326,7 +332,7 @@ index a10fb64..1f8965f 100644
      args = parser.parse_args()
  
      # Input
-@@ -92,7 +113,7 @@ def parse_args_to_cfg():
+@@ -92,7 +119,7 @@ def parse_args_to_cfg():
          writer.close()
          reader.close()
  
@@ -335,7 +341,7 @@ index a10fb64..1f8965f 100644
  
  
  @torch.no_grad()
-@@ -200,20 +221,25 @@ def load_data_dict(cfg):
+@@ -200,20 +227,25 @@ def load_data_dict(cfg):
      return data
  
  
@@ -368,7 +374,7 @@ index a10fb64..1f8965f 100644
  
      # -- rendering code -- #
      video_path = cfg.video_path
-@@ -221,15 +247,33 @@ def render_incam(cfg):
+@@ -221,15 +253,33 @@ def render_incam(cfg):
      K = pred["K_fullimg"][0]
  
      # renderer
@@ -405,7 +411,7 @@ index a10fb64..1f8965f 100644
  
          # # bbx
          # bbx_xys_ = bbx_xys_render[i].cpu().numpy()
-@@ -242,7 +286,13 @@ def render_incam(cfg):
+@@ -242,43 +292,68 @@ def render_incam(cfg):
      reader.close()
  
  
@@ -418,9 +424,22 @@ index a10fb64..1f8965f 100644
 +        render_device = _get_render_device()
 +
      global_video_path = Path(cfg.paths.global_video)
-     if global_video_path.exists():
-         Log.info(f"[Render Global] Video already exists at {global_video_path}")
-@@ -250,34 +300,49 @@ def render_global(cfg):
+-    if global_video_path.exists():
+-        Log.info(f"[Render Global] Video already exists at {global_video_path}")
++    global_front_path = global_video_path.with_name("2_global_front.mp4")
++    global_side_path = global_video_path.with_name("2_global_side.mp4")
++
++    requested: list[tuple[str, Path, float]] = []
++    if not global_video_path.exists():
++        requested.append(("Global (45deg)", global_video_path, 45.0))
++    if _should_render_extra_views():
++        if not global_front_path.exists():
++            requested.append(("Global (front)", global_front_path, 0.0))
++        if not global_side_path.exists():
++            requested.append(("Global (side)", global_side_path, 90.0))
++    if not requested:
++        Log.info(f"[Render Global] Video(s) already exist under {global_video_path.parent}")
+         return
  
      debug_cam = False
      pred = torch.load(cfg.paths.hmr4d_results)
@@ -434,13 +453,12 @@ index a10fb64..1f8965f 100644
 +    from hmr4d.utils.body_model.smplx_lite import SmplxLiteSmplN24
 +
 +    smpl24 = SmplxLiteSmplN24().to(render_device)
++
++    params = to_cuda(pred["smpl_params_global"]) if render_device == "cuda" else pred["smpl_params_global"]
  
 -    # smpl
 -    smplx_out = smplx(**to_cuda(pred["smpl_params_global"]))
 -    pred_ay_verts = torch.stack([torch.matmul(smplx2smpl, v_) for v_ in smplx_out.vertices])
-+    params = to_cuda(pred["smpl_params_global"]) if render_device == "cuda" else pred["smpl_params_global"]
- 
--    def move_to_start_point_face_z(verts):
 +    # smplx vertices + SMPL-24 joints (for stable "face-z" transform and ground plane sizing).
 +    smplx_out = smplx(**params)
 +    verts_glob = smplx_out.vertices  # (L, V, 3)
@@ -450,7 +468,8 @@ index a10fb64..1f8965f 100644
 +        params["global_orient"],
 +        params.get("transl", None),
 +    )  # (L, 24, 3)
-+
+ 
+-    def move_to_start_point_face_z(verts):
 +    def move_to_start_point_face_z(verts: torch.Tensor, joints: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
          "XZ to origin, Start from the ground, Face-Z"
 -        # position
@@ -468,6 +487,15 @@ index a10fb64..1f8965f 100644
 -        T_ay2ayfz = compute_T_ayfz2ay(einsum(J_regressor, verts[[0]], "j v, l v i -> l j i"), inverse=True)
 -        verts = apply_T_on_points(verts, T_ay2ayfz)
 -        return verts
+-
+-    verts_glob = move_to_start_point_face_z(pred_ay_verts)
+-    joints_glob = einsum(J_regressor, verts_glob, "j v, l v i -> l j i")  # (L, J, 3)
+-    global_R, global_T, global_lights = get_global_cameras_static(
+-        verts_glob.cpu(),
+-        beta=2.0,
+-        cam_height_degree=20,
+-        target_center_height=1.0,
+-    )
 +        joints = joints - offset
 +
 +        T_ay2ayfz = compute_T_ayfz2ay(joints[[0]], inverse=True)  # (1, 4, 4)
@@ -475,20 +503,12 @@ index a10fb64..1f8965f 100644
 +        verts = apply_T_on_points(verts, T_seq)
 +        joints = apply_T_on_points(joints, T_seq)
 +        return verts, joints
- 
--    verts_glob = move_to_start_point_face_z(pred_ay_verts)
--    joints_glob = einsum(J_regressor, verts_glob, "j v, l v i -> l j i")  # (L, J, 3)
++
 +    verts_glob, joints_glob = move_to_start_point_face_z(verts_glob, joints_glob)
-     global_R, global_T, global_lights = get_global_cameras_static(
-         verts_glob.cpu(),
-         beta=2.0,
-         cam_height_degree=20,
-         target_center_height=1.0,
-+        device=render_device,
-     )
  
      # -- rendering code -- #
-@@ -286,25 +351,55 @@ def render_global(cfg):
+     video_path = cfg.video_path
+@@ -286,25 +361,69 @@ def render_global(cfg):
      _, _, K = create_camera_sensor(width, height, 24)  # render as 24mm lens
  
      # renderer
@@ -507,23 +527,33 @@ index a10fb64..1f8965f 100644
      renderer.set_ground(scale * 1.5, cx, cz)
 -    color = torch.ones(3).float().cuda() * 0.8
 +    color = torch.ones(3).float().to(render_device) * 0.8
+ 
+     render_length = length if not debug_cam else 8
+-    writer = get_writer(global_video_path, fps=30, crf=CRF)
+-    for i in tqdm(range(render_length), desc=f"Rendering Global"):
+-        cameras = renderer.create_camera(global_R[i], global_T[i])
+-        img = renderer.render_with_ground(verts_glob[[i]], color[None], cameras, global_lights)
+-        writer.write_frame(img)
+-    writer.close()
 +
-+    # Preflight: if CUDA kernels are missing for this GPU, fall back to CPU rendering.
++    # Preflight: if CUDA kernels are missing for this GPU, fall back to CPU rendering (once).
 +    try:
-+        cameras0 = renderer.create_camera(global_R[0], global_T[0])
-+        _ = renderer.render_with_ground(verts_glob_render[[0]], color[None], cameras0, global_lights)
++        label0, _, vec_rot0 = requested[0]
++        global_R0, global_T0, global_lights0 = get_global_cameras_static(
++            verts_glob.cpu(),
++            beta=2.0,
++            cam_height_degree=20,
++            target_center_height=1.0,
++            vec_rot=vec_rot0,
++            device=render_device,
++        )
++        cameras0 = renderer.create_camera(global_R0[0], global_T0[0])
++        _ = renderer.render_with_ground(verts_glob_render[[0]], color[None], cameras0, global_lights0)
 +    except RuntimeError as exc:
 +        msg = str(exc).lower()
 +        if render_device == "cuda" and "no kernel image" in msg:
 +            Log.info("[Render Global] CUDA rasterizer unsupported; falling back to CPU.")
 +            render_device = "cpu"
-+            global_R, global_T, global_lights = get_global_cameras_static(
-+                verts_glob.cpu(),
-+                beta=2.0,
-+                cam_height_degree=20,
-+                target_center_height=1.0,
-+                device=render_device,
-+            )
 +            verts_glob_render = verts_glob.detach().cpu()
 +            joints_glob_render = joints_glob.detach().cpu()
 +            renderer = Renderer(width, height, device=render_device, faces=faces_smplx, K=K)
@@ -532,15 +562,24 @@ index a10fb64..1f8965f 100644
 +            color = torch.ones(3).float().to(render_device) * 0.8
 +        else:
 +            raise
- 
-     render_length = length if not debug_cam else 8
-     writer = get_writer(global_video_path, fps=30, crf=CRF)
-     for i in tqdm(range(render_length), desc=f"Rendering Global"):
-         cameras = renderer.create_camera(global_R[i], global_T[i])
--        img = renderer.render_with_ground(verts_glob[[i]], color[None], cameras, global_lights)
-+        img = renderer.render_with_ground(verts_glob_render[[i]], color[None], cameras, global_lights)
-         writer.write_frame(img)
-     writer.close()
++
++    for label, out_path, vec_rot in requested:
++        Log.info(f"[Render Global] {label} -> {out_path}")
++        global_R, global_T, global_lights = get_global_cameras_static(
++            verts_glob.cpu(),
++            beta=2.0,
++            cam_height_degree=20,
++            target_center_height=1.0,
++            vec_rot=vec_rot,
++            device=render_device,
++        )
++
++        writer = get_writer(out_path, fps=30, crf=CRF)
++        for i in tqdm(range(render_length), desc=f"Rendering {label}"):
++            cameras = renderer.create_camera(global_R[i], global_T[i])
++            img = renderer.render_with_ground(verts_glob_render[[i]], color[None], cameras, global_lights)
++            writer.write_frame(img)
++        writer.close()
  
  
  if __name__ == "__main__":
@@ -549,7 +588,7 @@ index a10fb64..1f8965f 100644
      paths = cfg.paths
      Log.info(f"[GPU]: {torch.cuda.get_device_name()}")
      Log.info(f'[GPU]: {torch.cuda.get_device_properties("cuda")}')
-@@ -327,8 +422,15 @@ if __name__ == "__main__":
+@@ -327,8 +446,15 @@ if __name__ == "__main__":
          torch.save(pred, paths.hmr4d_results)
  
      # ===== Render ===== #

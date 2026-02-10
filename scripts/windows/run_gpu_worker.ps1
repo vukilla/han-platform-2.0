@@ -53,7 +53,8 @@ $env:HAN_WORKER_ROLE = $role
 # GVHMR mesh preview rendering:
 # - Enable GVHMR's native render videos so the Studio preview can show a real body mesh.
 # - Default to CUDA rendering (fast). Our GVHMR patch will fall back to CPU if rasterization fails.
-# - Skip the "incam" overlay video since Studio already shows the original input video on the left.
+# - Render the "incam" overlay video so users can view the reconstruction in the original camera view.
+# - Optionally render extra global views (front/side) so the user can flip perspectives in Studio.
 if (-not $env:GVHMR_NATIVE_RENDER) {
   $env:GVHMR_NATIVE_RENDER = "1"
 }
@@ -61,7 +62,10 @@ if (-not $env:GVHMR_RENDER_DEVICE) {
   $env:GVHMR_RENDER_DEVICE = "cuda"
 }
 if (-not $env:GVHMR_RENDER_INCAM) {
-  $env:GVHMR_RENDER_INCAM = "0"
+  $env:GVHMR_RENDER_INCAM = "1"
+}
+if (-not $env:GVHMR_RENDER_EXTRA_VIEWS) {
+  $env:GVHMR_RENDER_EXTRA_VIEWS = "1"
 }
 
 foreach ($k in @("REDIS_URL", "DATABASE_URL", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET")) {

@@ -595,12 +595,13 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
     env["PYTHONPATH"] = gvhmr_pp if not pythonpath else (gvhmr_pp + os.pathsep + pythonpath)
 
     if enable_native_render:
-        # Our Studio UI already shows the original video on the left, so we don't need
-        # GVHMR's "incam" overlay video for the preview.
-        env.setdefault("GVHMR_RENDER_INCAM", "0")
-
         # Default to CUDA rendering (fast). GVHMR will fall back to CPU if rasterization fails.
         env.setdefault("GVHMR_RENDER_DEVICE", "cuda")
+        # Render the in-camera overlay video so users can view the reconstruction from the
+        # original camera view (helps debugging + validation).
+        env.setdefault("GVHMR_RENDER_INCAM", "1")
+        # Render extra global views (front/side) so the Studio UI can offer a view toggle.
+        env.setdefault("GVHMR_RENDER_EXTRA_VIEWS", "1")
 
     # The Windows bootstrap installs a minimal `external/gvhmr/pytorch3d` stub so GVHMR can
     # run inference without the full PyTorch3D renderer. When native rendering is enabled
@@ -670,7 +671,12 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
     npz_path = output_dir / f"{video_path.stem}_gvhmr_smplx.npz"
     np.savez_compressed(npz_path, **payload["smpl_params_global"])
 
+    rendered_input_norm = results_path.parent / "0_input_video.mp4"
+    rendered_incam = results_path.parent / "1_incam.mp4"
     rendered_global = results_path.parent / "2_global.mp4"
+    rendered_global_front = results_path.parent / "2_global_front.mp4"
+    rendered_global_side = results_path.parent / "2_global_side.mp4"
+
     preview_path = rendered_global if rendered_global.exists() else (output_dir / f"{video_path.stem}_gvhmr_preview.mp4")
     preview = None
     preview_error = None
@@ -693,6 +699,10 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         "preview_error": preview_error,
         "native_render": bool(enable_native_render),
         "native_render_global_mp4": str(rendered_global) if rendered_global.exists() else None,
+        "native_render_incam_mp4": str(rendered_incam) if rendered_incam.exists() else None,
+        "native_render_global_front_mp4": str(rendered_global_front) if rendered_global_front.exists() else None,
+        "native_render_global_side_mp4": str(rendered_global_side) if rendered_global_side.exists() else None,
+        "native_render_input_norm_mp4": str(rendered_input_norm) if rendered_input_norm.exists() else None,
         "python_cmd": cmd[:3] if cmd[:2] == ["cmd.exe", "/c"] else cmd[:1],
         "static_cam": bool(static_cam),
         "use_dpvo": bool(use_dpvo),
@@ -707,6 +717,10 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         "results_path": str(results_path),
         "gvhmr_log_path": str(gvhmr_log),
         "preview_mp4_path": str(preview_path) if preview_path.exists() else None,
+        "preview_incam_mp4_path": str(rendered_incam) if rendered_incam.exists() else None,
+        "preview_global_front_mp4_path": str(rendered_global_front) if rendered_global_front.exists() else None,
+        "preview_global_side_mp4_path": str(rendered_global_side) if rendered_global_side.exists() else None,
+        "input_norm_mp4_path": str(rendered_input_norm) if rendered_input_norm.exists() else None,
         "preview_error": preview_error,
     }
 

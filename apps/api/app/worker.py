@@ -484,11 +484,23 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
     meta_path = Path(payload.get("meta_path", "")) if payload.get("meta_path") else None
     gvhmr_log_path = Path(payload.get("gvhmr_log_path", "")) if payload.get("gvhmr_log_path") else None
     preview_path = Path(payload.get("preview_mp4_path", "")) if payload.get("preview_mp4_path") else None
+    preview_incam_path = Path(payload.get("preview_incam_mp4_path", "")) if payload.get("preview_incam_mp4_path") else None
+    preview_global_front_path = (
+        Path(payload.get("preview_global_front_mp4_path", "")) if payload.get("preview_global_front_mp4_path") else None
+    )
+    preview_global_side_path = (
+        Path(payload.get("preview_global_side_mp4_path", "")) if payload.get("preview_global_side_mp4_path") else None
+    )
+    input_norm_path = Path(payload.get("input_norm_mp4_path", "")) if payload.get("input_norm_mp4_path") else None
 
     pose_npz_key = f"demos/{demo_id}/poses/{job_id}/gvhmr_smplx.npz"
     pose_meta_key = f"demos/{demo_id}/poses/{job_id}/gvhmr_meta.json"
     pose_log_key = f"demos/{demo_id}/poses/{job_id}/gvhmr.log"
     pose_preview_key = f"demos/{demo_id}/poses/{job_id}/gvhmr_preview.mp4"
+    pose_preview_incam_key = f"demos/{demo_id}/poses/{job_id}/gvhmr_incam.mp4"
+    pose_preview_global_front_key = f"demos/{demo_id}/poses/{job_id}/gvhmr_global_front.mp4"
+    pose_preview_global_side_key = f"demos/{demo_id}/poses/{job_id}/gvhmr_global_side.mp4"
+    pose_input_norm_key = f"demos/{demo_id}/poses/{job_id}/gvhmr_input_norm.mp4"
 
     # Always attempt to upload meta + log for debugging.
     pose_log_uri = None
@@ -520,11 +532,25 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
     pose_fallback = None
     pose_error = None
     pose_preview_uri = None
+    pose_preview_incam_uri = None
+    pose_preview_global_front_uri = None
+    pose_preview_global_side_uri = None
+    pose_input_norm_uri = None
     if ok and npz_path and meta_path and npz_path.exists() and meta_path.exists():
         upload_file(pose_npz_key, npz_path, content_type="application/octet-stream")
         upload_file(pose_meta_key, meta_path, content_type="application/json")
         if preview_path and preview_path.exists():
             pose_preview_uri = upload_file(pose_preview_key, preview_path, content_type="video/mp4")
+        if preview_incam_path and preview_incam_path.exists():
+            pose_preview_incam_uri = upload_file(pose_preview_incam_key, preview_incam_path, content_type="video/mp4")
+        if preview_global_front_path and preview_global_front_path.exists():
+            pose_preview_global_front_uri = upload_file(
+                pose_preview_global_front_key, preview_global_front_path, content_type="video/mp4"
+            )
+        if preview_global_side_path and preview_global_side_path.exists():
+            pose_preview_global_side_uri = upload_file(pose_preview_global_side_key, preview_global_side_path, content_type="video/mp4")
+        if input_norm_path and input_norm_path.exists():
+            pose_input_norm_uri = upload_file(pose_input_norm_key, input_norm_path, content_type="video/mp4")
         if pose_preview_uri is None:
             # Always provide *some* preview asset to the Web UI. If the skeleton render
             # failed for any reason, fall back to the original video.
@@ -643,6 +669,10 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
         "pose_meta_uri": pose_meta_key,
         "pose_log_uri": pose_log_uri,
         "pose_preview_mp4_uri": pose_preview_uri,
+        "pose_preview_incam_mp4_uri": pose_preview_incam_uri,
+        "pose_preview_global_front_mp4_uri": pose_preview_global_front_uri,
+        "pose_preview_global_side_mp4_uri": pose_preview_global_side_uri,
+        "pose_input_norm_mp4_uri": pose_input_norm_uri,
         "pose_ok": bool(ok),
         "pose_fallback": pose_fallback,
         "pose_error": pose_error,

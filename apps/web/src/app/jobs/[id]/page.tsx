@@ -61,6 +61,9 @@ export default function JobProgressPage() {
   const [xmimicJobId, setXmimicJobId] = useState<string | null>(null);
   const autoTrainTriggered = useRef(false);
   const [requeueStatus, setRequeueStatus] = useState<string | null>(null);
+  const originalVideoRef = useRef<HTMLVideoElement | null>(null);
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const syncLockRef = useRef(false);
 
   const onlyPose = Boolean(job?.params_json?.only_pose);
 
@@ -267,6 +270,18 @@ export default function JobProgressPage() {
     job?.params_json && typeof job.params_json.pose_preview_mp4_uri === "string"
       ? (job.params_json.pose_preview_mp4_uri as string)
       : null;
+  const posePreviewIncam =
+    job?.params_json && typeof job.params_json.pose_preview_incam_mp4_uri === "string"
+      ? (job.params_json.pose_preview_incam_mp4_uri as string)
+      : null;
+  const posePreviewGlobalFront =
+    job?.params_json && typeof job.params_json.pose_preview_global_front_mp4_uri === "string"
+      ? (job.params_json.pose_preview_global_front_mp4_uri as string)
+      : null;
+  const posePreviewGlobalSide =
+    job?.params_json && typeof job.params_json.pose_preview_global_side_mp4_uri === "string"
+      ? (job.params_json.pose_preview_global_side_mp4_uri as string)
+      : null;
   const demoVideo = demo?.video_uri ?? null;
   const previewMessage = jobIsComplete
     ? poseOk === false
@@ -291,6 +306,166 @@ export default function JobProgressPage() {
   };
 
   const waitingForWorker = !jobIsComplete && !jobIsFailed && currentIndex === -1;
+
+  type PreviewView = { id: string; label: string; src: string };
+  const previewViews: PreviewView[] = [
+    posePreviewIncam ? { id: "incam", label: "Match camera (overlay)", src: posePreviewIncam } : null,
+    posePreview ? { id: "global45", label: "Global (45 deg)", src: posePreview } : null,
+    posePreviewGlobalFront ? { id: "front", label: "Global (front)", src: posePreviewGlobalFront } : null,
+    posePreviewGlobalSide ? { id: "side", label: "Global (side)", src: posePreviewGlobalSide } : null,
+  ].filter((v): v is PreviewView => Boolean(v));
+
+  const [selectedPreviewId, setSelectedPreviewId] = useState<string>("");
+  useEffect(() => {
+    if (selectedPreviewId && previewViews.some((v) => v.id === selectedPreviewId)) {
+      return;
+    }
+    const next = previewViews.find((v) => v.id === "incam") ?? previewViews[0] ?? null;
+    setSelectedPreviewId(next?.id ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posePreviewIncam, posePreview, posePreviewGlobalFront, posePreviewGlobalSide]);
+
+  const selectedPreviewSrc = (previewViews.find((v) => v.id === selectedPreviewId) ?? previewViews[0] ?? null)?.src ?? null;
+
+  const clampTime = useCallback((t: number, video: HTMLVideoElement) => {
+    const d = video.duration;
+    if (Number.isFinite(d) && d > 0) {
+      return Math.min(Math.max(t, 0), Math.max(0, d - 0.001));
+    }
+    return Math.max(t, 0);
+  }, []);
+
+  const syncTime = useCallback(
+    (from: HTMLVideoElement, to: HTMLVideoElement, opts?: { force?: boolean }) => {
+      const force = Boolean(opts?.force);
+      const target = clampTime(from.currentTime, to);
+      const diff = Math.abs((to.currentTime || 0) - target);
+      if (force || diff > 0.075) {
+        to.currentTime = target;
+      }
+    },
+    [clampTime],
+  );
+
+  const syncRate = useCallback((from: HTMLVideoElement, to: HTMLVideoElement) => {
+    if (Number.isFinite(from.playbackRate) && from.playbackRate > 0 && to.playbackRate !== from.playbackRate) {
+      to.playbackRate = from.playbackRate;
+    }
+  }, []);
+
+  const handleOriginalPlay = useCallback(() => {
+    const a = originalVideoRef.current;
+    const b = previewVideoRef.current;
+    if (!a || !b) return;
+    if (syncLockRef.current) return;
+    syncLockRef.current = true;
+    syncRate(a, b);
+    syncTime(a, b, { force: true });
+    b.play()
+      .catch(() => null)
+      .finally(() => {
+        syncLockRef.current = false;
+      });
+  }, [syncRate, syncTime]);
+
+  const handleOriginalPause = useCallback(() => {
+    const b = previewVideoRef.current;
+    if (!b) return;
+    if (syncLockRef.current) return;
+    syncLockRef.current = true;
+    b.pause();
+    syncLockRef.current = false;
+  }, []);
+
+  const handleOriginalSeeking = useCallback(() => {
+    const a = originalVideoRef.current;
+    const b = previewVideoRef.current;
+    if (!a || !b) return;
+    if (syncLockRef.current) return;
+    syncLockRef.current = true;
+    syncTime(a, b, { force: true });
+    syncLockRef.current = false;
+  }, [syncTime]);
+
+  const handleOriginalRateChange = useCallback(() => {
+    const a = originalVideoRef.current;
+    const b = previewVideoRef.current;
+    if (!a || !b) return;
+    if (syncLockRef.current) return;
+    syncLockRef.current = true;
+    syncRate(a, b);
+    syncLockRef.current = false;
+  }, [syncRate]);
+
+  const handleOriginalTimeUpdate = useCallback(() => {
+    const a = originalVideoRef.current;
+    const b = previewVideoRef.current;
+    if (!a || !b) return;
+    if (syncLockRef.current) return;
+    // Small drift correction while playing.
+    if (!a.paused && !b.paused) {
+      syncLockRef.current = true;
+      syncTime(a, b, { force: false });
+      syncLockRef.current = false;
+    }
+  }, [syncTime]);
+
+  const handlePreviewLoadedMetadata = useCallback(() => {
+    const a = originalVideoRef.current;
+    const b = previewVideoRef.current;
+    if (!a || !b) return;
+    syncLockRef.current = true;
+    syncRate(a, b);
+    syncTime(a, b, { force: true });
+    if (!a.paused) {
+      b.play().catch(() => null);
+    }
+    syncLockRef.current = false;
+  }, [syncRate, syncTime]);
+
+  const handlePreviewPlay = useCallback(() => {
+    const a = originalVideoRef.current;
+    const b = previewVideoRef.current;
+    if (!a || !b) return;
+    if (syncLockRef.current) return;
+    syncLockRef.current = true;
+    syncRate(b, a);
+    syncTime(b, a, { force: true });
+    a.play()
+      .catch(() => null)
+      .finally(() => {
+        syncLockRef.current = false;
+      });
+  }, [syncRate, syncTime]);
+
+  const handlePreviewPause = useCallback(() => {
+    const a = originalVideoRef.current;
+    if (!a) return;
+    if (syncLockRef.current) return;
+    syncLockRef.current = true;
+    a.pause();
+    syncLockRef.current = false;
+  }, []);
+
+  const handlePreviewSeeking = useCallback(() => {
+    const a = originalVideoRef.current;
+    const b = previewVideoRef.current;
+    if (!a || !b) return;
+    if (syncLockRef.current) return;
+    syncLockRef.current = true;
+    syncTime(b, a, { force: true });
+    syncLockRef.current = false;
+  }, [syncTime]);
+
+  const handlePreviewRateChange = useCallback(() => {
+    const a = originalVideoRef.current;
+    const b = previewVideoRef.current;
+    if (!a || !b) return;
+    if (syncLockRef.current) return;
+    syncLockRef.current = true;
+    syncRate(b, a);
+    syncLockRef.current = false;
+  }, [syncRate]);
 
   async function handleRequeue() {
     if (!jobId) return;
@@ -396,22 +571,59 @@ export default function JobProgressPage() {
         ))}
       </Card>
 
-      {demoVideo || posePreview ? (
+      {demoVideo || selectedPreviewSrc ? (
         <Card className="space-y-4">
           <h2 className="text-xl font-semibold text-black">Video preview</h2>
           <div className="grid gap-6 lg:grid-cols-2">
             <div className="space-y-2">
               <p className="text-sm font-semibold text-black/60">Original</p>
               {demoVideo ? (
-                <video className="w-full rounded-2xl border border-black/10 bg-black" controls playsInline src={demoVideo} />
+                <video
+                  ref={originalVideoRef}
+                  className="w-full rounded-2xl border border-black/10 bg-black"
+                  controls
+                  playsInline
+                  src={demoVideo}
+                  onPlay={handleOriginalPlay}
+                  onPause={handleOriginalPause}
+                  onSeeking={handleOriginalSeeking}
+                  onRateChange={handleOriginalRateChange}
+                  onTimeUpdate={handleOriginalTimeUpdate}
+                />
               ) : (
                 <p className="text-sm text-black/60">Waiting for upload...</p>
               )}
             </div>
             <div className="space-y-2">
-              <p className="text-sm font-semibold text-black/60">3D preview</p>
-              {posePreview ? (
-                <video className="w-full rounded-2xl border border-black/10 bg-black" controls playsInline src={posePreview} />
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-black/60">3D preview</p>
+                {previewViews.length > 1 ? (
+                  <select
+                    className="rounded-xl border border-black/15 bg-white px-3 py-2 text-xs font-semibold text-black"
+                    value={selectedPreviewId}
+                    onChange={(event) => setSelectedPreviewId(event.target.value)}
+                  >
+                    {previewViews.map((view) => (
+                      <option key={view.id} value={view.id}>
+                        {view.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+              </div>
+              {selectedPreviewSrc ? (
+                <video
+                  ref={previewVideoRef}
+                  className="w-full rounded-2xl border border-black/10 bg-black"
+                  controls
+                  playsInline
+                  src={selectedPreviewSrc}
+                  onLoadedMetadata={handlePreviewLoadedMetadata}
+                  onPlay={handlePreviewPlay}
+                  onPause={handlePreviewPause}
+                  onSeeking={handlePreviewSeeking}
+                  onRateChange={handlePreviewRateChange}
+                />
               ) : demoVideo ? (
                 <div className="relative">
                   <video className="w-full rounded-2xl border border-black/10 bg-black" controls playsInline src={demoVideo} />
