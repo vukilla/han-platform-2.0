@@ -24,7 +24,6 @@ av==13.0.0
 joblib
 
 trimesh
-chumpy
 smplx
 
 ultralytics==8.2.42

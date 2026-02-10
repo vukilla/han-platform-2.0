@@ -26,6 +26,40 @@ def _resolve_heavy_checkpoints_root() -> Path:
     return _repo_root() / "external" / "humanoid-projects" / "GVHMR" / "inputs" / "checkpoints"
 
 
+def _resolve_isaac_sim_python_bat() -> Path | None:
+    """Return Isaac Sim's `python.bat` if present (Windows).
+
+    When running inside Isaac Sim/Isaac Lab on Windows, many prebundled Python packages
+    (e.g., OpenCV) live in Isaac's extension `pip_prebundle` folders and are only
+    available when the environment is set up via `python.bat` (it calls `setup_python_env.bat`).
+    """
+    candidate = _repo_root() / "external" / "isaaclab" / "_isaac_sim" / "python.bat"
+    if candidate.exists():
+        return candidate
+    return None
+
+
+def _gvhmr_python_cmd() -> list[str]:
+    """Return a command prefix to run GVHMR demo scripts.
+
+    Priority:
+    1) `GVHMR_DEMO_PYTHON` env var (string path to an executable)
+    2) On Windows: Isaac Sim `python.bat` (ensures prebundled deps like `cv2` are importable)
+    3) Fallback: `sys.executable`
+    """
+    override = os.environ.get("GVHMR_DEMO_PYTHON")
+    if override:
+        return [override]
+
+    if os.name == "nt":
+        python_bat = _resolve_isaac_sim_python_bat()
+        if python_bat:
+            # Batch files require `cmd.exe /c`.
+            return ["cmd.exe", "/c", str(python_bat)]
+
+    return [sys.executable]
+
+
 def _ensure_checkpoints(gvhmr_root: Path, *, require_dpvo: bool) -> None:
     """Ensure `external/gvhmr/inputs/checkpoints` exists by linking staged checkpoints.
 
@@ -108,8 +142,7 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
     output_root = output_dir / "gvhmr"
     output_root.mkdir(parents=True, exist_ok=True)
 
-    cmd = [
-        sys.executable,
+    cmd = _gvhmr_python_cmd() + [
         str(gvhmr_root / "tools" / "demo" / "demo.py"),
         "--video",
         str(video_path),
@@ -150,6 +183,7 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         "results_path": str(results_path),
         "output_npz": str(npz_path),
         "gvhmr_log": str(gvhmr_log),
+        "python_cmd": cmd[:3] if cmd[:2] == ["cmd.exe", "/c"] else cmd[:1],
         "static_cam": bool(static_cam),
         "use_dpvo": bool(use_dpvo),
         "f_mm": int(f_mm) if f_mm is not None else None,
