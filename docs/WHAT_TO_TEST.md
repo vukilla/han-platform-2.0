@@ -37,21 +37,24 @@ Optional one-command smoke tests:
 /Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/smoke_e2e_with_gpu_real.sh
 ```
 
-## 0.5) Web UI: GVHMR Only (Fastest)
+## 0.5) Web UI: Motion Recovery Only (Fastest)
 
 This is the simplest “phone video -> 3D motion” UX loop.
 
 1. Ensure the Windows GPU worker is running (see below).
 1. One-time: upload the licensed SMPL-X model file (`SMPLX_NEUTRAL.npz`) so GVHMR can run end-to-end:
-1. Open `http://localhost:3000/gvhmr`
+1. Open `http://localhost:3000/studio`
 1. If it shows `SMPL-X model missing`, upload the `.npz` file (see `docs/GVHMR.md` for where to download it).
-1. Open `http://localhost:3000/gvhmr`
+1. Open `http://localhost:3000/studio`
 1. Choose an `.mp4` (10-20s recommended).
 1. Leave defaults:
 1. Static camera: on
 1. Quick preview: on (trims to first 12s to keep demos responsive)
-1. Click `Run GVHMR`
+1. Click `Run motion recovery`
 1. You will be redirected to `/jobs/<id>` where you can watch stage progress and see a side-by-side preview.
+
+Notes:
+- `http://localhost:3000/gvhmr` is still available as a troubleshooting/setup page.
 
 Fastest “do it for me” launch:
 
