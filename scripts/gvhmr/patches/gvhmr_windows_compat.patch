@@ -72,6 +72,108 @@ index 6ef3897..55c80e8 100644
  
  try:
      from hmr4d.utils.preproc.slam import SLAMModel
+diff --git a/hmr4d/utils/vis/renderer.py b/hmr4d/utils/vis/renderer.py
+index f4d6232..0f47a5a 100644
+--- a/hmr4d/utils/vis/renderer.py
++++ b/hmr4d/utils/vis/renderer.py
+@@ -2,20 +2,51 @@ import cv2
+ import torch
+ import numpy as np
+ 
+-from pytorch3d.renderer import (
+-    PerspectiveCameras,
+-    TexturesVertex,
+-    PointLights,
+-    Materials,
+-    RasterizationSettings,
+-    MeshRenderer,
+-    MeshRasterizer,
+-    SoftPhongShader,
+-)
+-from pytorch3d.structures import Meshes
+-from pytorch3d.structures.meshes import join_meshes_as_scene
+-from pytorch3d.renderer.cameras import look_at_rotation
+-from pytorch3d.transforms import axis_angle_to_matrix
++_HAS_PYTORCH3D_RENDERER = True
++_PYTORCH3D_IMPORT_ERROR = None
++
++try:
++    from pytorch3d.renderer import (
++        PerspectiveCameras,
++        TexturesVertex,
++        PointLights,
++        Materials,
++        RasterizationSettings,
++        MeshRenderer,
++        MeshRasterizer,
++        SoftPhongShader,
++    )
++    from pytorch3d.structures import Meshes
++    from pytorch3d.structures.meshes import join_meshes_as_scene
++    from pytorch3d.renderer.cameras import look_at_rotation
++    from pytorch3d.transforms import axis_angle_to_matrix
++except Exception as exc:  # noqa: BLE001
++    # GVHMR's renderer is optional for our pipeline. We run pose extraction only and
++    # pass `--skip_render` to the demo. To keep imports working on Windows where
++    # installing full pytorch3d is painful, we allow this module to import without it.
++    _HAS_PYTORCH3D_RENDERER = False
++    _PYTORCH3D_IMPORT_ERROR = exc
++    PerspectiveCameras = None  # type: ignore[assignment]
++    TexturesVertex = None  # type: ignore[assignment]
++    PointLights = None  # type: ignore[assignment]
++    Materials = None  # type: ignore[assignment]
++    RasterizationSettings = None  # type: ignore[assignment]
++    MeshRenderer = None  # type: ignore[assignment]
++    MeshRasterizer = None  # type: ignore[assignment]
++    SoftPhongShader = None  # type: ignore[assignment]
++    Meshes = None  # type: ignore[assignment]
++    join_meshes_as_scene = None  # type: ignore[assignment]
++    look_at_rotation = None  # type: ignore[assignment]
++    axis_angle_to_matrix = None  # type: ignore[assignment]
++
++
++def _require_pytorch3d() -> None:
++    if not _HAS_PYTORCH3D_RENDERER:
++        raise ImportError(
++            "GVHMR rendering requires `pytorch3d` (renderer/structures). "
++            "Install pytorch3d or run with `--skip_render`. "
++            f"Original error: {_PYTORCH3D_IMPORT_ERROR}"
++        )
+ 
+ from .renderer_tools import get_colors, checkerboard_geometry
+ 
+@@ -105,6 +136,7 @@ def compute_bbox_from_points(X, img_w, img_h, scaleFactor=1.2):
+ class Renderer:
+     def __init__(self, width, height, focal_length=None, device="cuda", faces=None, K=None, bin_size=None):
+         """set bin_size to 0 for no binning"""
++        _require_pytorch3d()
+         self.width = width
+         self.height = height
+         self.bin_size = bin_size
+@@ -276,6 +308,7 @@ class Renderer:
+ 
+ 
+ def create_meshes(verts, faces, colors):
++    _require_pytorch3d()
+     """
+     :param verts (B, V, 3)
+     :param faces (B, F, 3)
+@@ -287,6 +320,7 @@ def create_meshes(verts, faces, colors):
+ 
+ 
+ def get_global_cameras(verts, device="cuda", distance=5, position=(-5.0, 5.0, 0.0)):
++    _require_pytorch3d()
+     """This always put object at the center of view"""
+     positions = torch.tensor([position]).repeat(len(verts), 1)
+     targets = verts.mean(1)
+@@ -305,6 +339,7 @@ def get_global_cameras(verts, device="cuda", distance=5, position=(-5.0, 5.0, 0.
+ def get_global_cameras_static(
+     verts, beta=4.0, cam_height_degree=30, target_center_height=1.0, use_long_axis=False, vec_rot=45, device="cuda"
+ ):
++    _require_pytorch3d()
+     L, V, _ = verts.shape
+ 
+     # Compute target trajectory, denote as center + scale
 diff --git a/hmr4d/utils/wis3d_utils.py b/hmr4d/utils/wis3d_utils.py
 index df54d8b..78caa92 100644
 --- a/hmr4d/utils/wis3d_utils.py
