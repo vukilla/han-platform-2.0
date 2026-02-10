@@ -37,6 +37,7 @@ celery_app = Celery(
 
 cpu_exchange = Exchange(settings.celery_cpu_queue, type="direct")
 gpu_exchange = Exchange(settings.celery_gpu_queue, type="direct")
+pose_exchange = Exchange(settings.celery_pose_queue, type="direct")
 
 celery_app.conf.update(
     task_default_queue=settings.celery_default_queue,
@@ -46,6 +47,7 @@ celery_app.conf.update(
     task_queues=[
         Queue(settings.celery_cpu_queue, cpu_exchange, routing_key=settings.celery_cpu_queue),
         Queue(settings.celery_gpu_queue, gpu_exchange, routing_key=settings.celery_gpu_queue),
+        Queue(settings.celery_pose_queue, pose_exchange, routing_key=settings.celery_pose_queue),
     ],
     worker_prefetch_multiplier=settings.celery_prefetch_multiplier,
     task_acks_late=settings.celery_task_acks_late,

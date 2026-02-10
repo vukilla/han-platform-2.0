@@ -251,9 +251,19 @@ def run_xgen(
         params_json=payload.params_json,
         idempotency_key=payload.idempotency_key,
     )
-    requires_gpu = bool((payload.params_json or {}).get("requires_gpu", False))
-    queue_name = settings.celery_gpu_queue if requires_gpu else settings.celery_cpu_queue
-    max_depth = settings.celery_max_queue_gpu if requires_gpu else settings.celery_max_queue_cpu
+    params = payload.params_json or {}
+    requires_gpu = bool(params.get("requires_gpu", False))
+    pose_only = bool(params.get("only_pose", False))
+    pose_estimator = str(params.get("pose_estimator") or "").strip().lower()
+
+    # Route interactive GVHMR pose previews to a dedicated queue so they don't get stuck
+    # behind (or crash on) long-running training jobs.
+    if requires_gpu and pose_only and pose_estimator == "gvhmr":
+        queue_name = settings.celery_pose_queue
+        max_depth = settings.celery_max_queue_pose
+    else:
+        queue_name = settings.celery_gpu_queue if requires_gpu else settings.celery_cpu_queue
+        max_depth = settings.celery_max_queue_gpu if requires_gpu else settings.celery_max_queue_cpu
     if is_queue_full(queue_name, max_depth):
         raise HTTPException(status_code=429, detail=f"Queue {queue_name} is at capacity")
     run_xgen_job.apply_async(args=[str(job.id)], queue=queue_name)
@@ -473,6 +483,7 @@ def health(db: Session = Depends(get_db)):
     except Exception:
         pass
     checks["cpu_queue_depth"] = get_queue_depth(settings.celery_cpu_queue)
+    checks["pose_queue_depth"] = get_queue_depth(settings.celery_pose_queue)
     checks["gpu_queue_depth"] = get_queue_depth(settings.celery_gpu_queue)
     checks["status"] = "ok" if all([checks["db"], checks["redis"], checks["s3"]]) else "degraded"
     return checks

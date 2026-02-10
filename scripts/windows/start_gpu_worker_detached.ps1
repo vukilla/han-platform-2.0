@@ -1,6 +1,8 @@
 param(
   [Parameter(Mandatory = $true)]
-  [string]$MacIp
+  [string]$MacIp,
+
+  [string]$Queues = "gpu"
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,6 +17,13 @@ if (-not $MacIp) {
 }
 if (-not (Test-Path $runScript)) {
   throw "Missing script: $runScript"
+}
+if (-not $Queues) {
+  $Queues = "gpu"
+}
+$Queues = $Queues.Trim()
+if (-not $Queues) {
+  $Queues = "gpu"
 }
 
 Write-Host "== Start GPU Worker (detached) ==" -ForegroundColor Cyan
@@ -33,7 +42,7 @@ Write-Host ""
 $taskName = "han-gpu-worker"
 
 function Start-WorkerScheduledTask() {
-  $cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$runScript`" -MacIp `"$MacIp`" 1>> `"$outLog`" 2>> `"$errLog`""
+  $cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$runScript`" -MacIp `"$MacIp`" -Queues `"$Queues`" 1>> `"$outLog`" 2>> `"$errLog`""
 
   # Create/update a per-user scheduled task that runs only when the user is logged on.
   # This avoids storing a password and avoids OpenSSH job-object teardown killing the worker.
@@ -77,7 +86,7 @@ try {
   # Use `cmd.exe /c start ...` and do redirection at the CMD level so we still capture errors.
   $cmdLine = @(
     "start `"han-gpu-worker`" /min cmd.exe /c",
-    "`"powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$runScript`" -MacIp `"$MacIp`" 1>> `"$outLog`" 2>> `"$errLog`"`""
+    "`"powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$runScript`" -MacIp `"$MacIp`" -Queues `"$Queues`" 1>> `"$outLog`" 2>> `"$errLog`"`""
   ) -join " "
   cmd.exe /c $cmdLine | Out-Null
 }

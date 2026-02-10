@@ -11,7 +11,11 @@ param(
   [switch]$DownloadLightCheckpoints,
 
   # Best-effort attempt to download the remaining heavy checkpoints from GVHMR's public Google Drive folder.
-  [switch]$TryDownloadHeavyCheckpoints
+  [switch]$TryDownloadHeavyCheckpoints,
+
+  # Celery queues to consume. For GVHMR-only runs, use "pose".
+  # For full training/inference, use "gpu" (or "gpu,pose" to consume both).
+  [string]$Queues = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,8 +55,18 @@ if ($SetupGVHMR) {
   Write-Host ""
 }
 
+if (-not $Queues) {
+  # If we're setting up GVHMR, default to the pose queue so the worker doesn't crash-loop
+  # on unrelated training jobs while the user is focusing on pose previews.
+  $Queues = if ($SetupGVHMR) { "pose" } else { "gpu" }
+}
+$Queues = $Queues.Trim()
+if (-not $Queues) {
+  $Queues = if ($SetupGVHMR) { "pose" } else { "gpu" }
+}
+
 Write-Host "-- Bootstrapping + starting GPU worker --" -ForegroundColor Cyan
-powershell -NoProfile -ExecutionPolicy Bypass -File $oneClick -MacIp $MacIp -IsaacSimPath $IsaacSimPath
+powershell -NoProfile -ExecutionPolicy Bypass -File $oneClick -MacIp $MacIp -IsaacSimPath $IsaacSimPath -Queues $Queues
 
 Write-Host ""
 Write-Host "Next (Mac): run the REAL smoke test:" -ForegroundColor Green

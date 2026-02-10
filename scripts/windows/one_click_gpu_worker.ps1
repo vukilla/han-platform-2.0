@@ -2,7 +2,10 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$MacIp,
 
-  [string]$IsaacSimPath = "C:\\isaacsim"
+  [string]$IsaacSimPath = "C:\\isaacsim",
+
+  # Celery queues to consume (e.g., "gpu" for training, "pose" for GVHMR-only).
+  [string]$Queues = "gpu"
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,6 +20,7 @@ Write-Host "== One-click GPU worker (Windows) ==" -ForegroundColor Cyan
 Write-Host "Repo root:     $repoRoot"
 Write-Host "Mac IP:        $MacIp"
 Write-Host "Isaac Sim:     $IsaacSimPath"
+Write-Host "Queues:        $Queues"
 Write-Host ""
 
 if (-not $MacIp) {
@@ -65,7 +69,7 @@ if (Test-Path $stopWorker) {
   Write-Host ""
 }
 Write-Host "-- Starting GPU worker (detached) --" -ForegroundColor Cyan
-powershell -NoProfile -ExecutionPolicy Bypass -File $startDetached -MacIp $MacIp
+powershell -NoProfile -ExecutionPolicy Bypass -File $startDetached -MacIp $MacIp -Queues $Queues
 
 Write-Host ""
 Write-Host "Next (Mac): run the full smoke test:" -ForegroundColor Green

@@ -26,9 +26,13 @@ class Settings(BaseSettings):
 
     celery_cpu_queue: str = "cpu"
     celery_gpu_queue: str = "gpu"
+    # Dedicated queue for pose estimation (GVHMR). Keeps interactive pose previews
+    # responsive even if the main GPU queue is busy (or unstable) with training jobs.
+    celery_pose_queue: str = "pose"
     celery_default_queue: str = "cpu"
     celery_max_queue_cpu: int = 100
     celery_max_queue_gpu: int = 20
+    celery_max_queue_pose: int = 50
     celery_prefetch_multiplier: int = 1
     celery_task_acks_late: bool = True
     celery_reject_on_worker_lost: bool = True

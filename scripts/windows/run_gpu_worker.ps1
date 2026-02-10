@@ -1,5 +1,6 @@
 param(
-  [string]$MacIp = ""
+  [string]$MacIp = "",
+  [string]$Queues = "gpu"
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,6 +14,14 @@ Write-Host "== han-platform-2.0 GPU Worker (Windows) ==" -ForegroundColor Cyan
 Write-Host "Repo root: $repoRoot"
 Write-Host ""
 
+if (-not $Queues) {
+  $Queues = "gpu"
+}
+$Queues = $Queues.Trim()
+if (-not $Queues) {
+  $Queues = "gpu"
+}
+
 if ($MacIp) {
   $env:REDIS_URL = "redis://${MacIp}:6379/0"
   $env:DATABASE_URL = "postgresql+psycopg://han:han@${MacIp}:5432/han"
@@ -23,7 +32,7 @@ if ($MacIp) {
 }
 
 $env:HAN_WORKER_ROLE = "gpu"
-$env:HAN_WORKER_QUEUES = "gpu"
+$env:HAN_WORKER_QUEUES = $Queues
 
 foreach ($k in @("REDIS_URL", "DATABASE_URL", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET")) {
   $val = ""
@@ -81,9 +90,9 @@ try {
   Write-Host "-- Installing worker requirements into Isaac Sim python --" -ForegroundColor Cyan
   Invoke-CmdChecked "`"$isaacLabBat`" -p -m pip install -r $reqFile"
 
-  Write-Host "-- Starting Celery GPU worker (queue=gpu) --" -ForegroundColor Cyan
+  Write-Host "-- Starting Celery GPU worker (queue=$Queues) --" -ForegroundColor Cyan
   Write-Host "Stop with Ctrl+C. (Windows requires -P solo.)"
-  Invoke-CmdChecked "`"$isaacLabBat`" -p -m celery -A app.worker.celery_app worker -l info -Q gpu -P solo -c 1"
+  Invoke-CmdChecked "`"$isaacLabBat`" -p -m celery -A app.worker.celery_app worker -l info -Q $Queues -P solo -c 1"
 } finally {
   Pop-Location
 }
