@@ -8,6 +8,10 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { getXgenJob, runXmimic, XGenJobOut } from "@/lib/api";
 
+const DEFAULT_ISAACLAB_NUM_ENVS = 8;
+const DEFAULT_ISAACLAB_UPDATES = 2;
+const DEFAULT_ISAACLAB_ROLLOUT_STEPS = 64;
+
 const stages = [
   "INGEST_VIDEO",
   "ESTIMATE_POSE",
@@ -80,9 +84,10 @@ export default function JobProgressPage() {
         params.backend = "isaaclab_teacher_ppo";
         params.env_task = "cargo_pickup_v0";
         params.isaaclab_task = "cargo_pickup_franka";
-        params.num_envs = 32;
-        params.updates = 5;
-        params.rollout_steps = 128;
+        // Default to a quick run that completes in a few minutes on a single GPU.
+        params.num_envs = DEFAULT_ISAACLAB_NUM_ENVS;
+        params.updates = DEFAULT_ISAACLAB_UPDATES;
+        params.rollout_steps = DEFAULT_ISAACLAB_ROLLOUT_STEPS;
       }
       const xmimic = await runXmimic(datasetId, mode, params);
       setXmimicJobId(xmimic.id);

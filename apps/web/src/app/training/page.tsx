@@ -14,9 +14,10 @@ export default function TrainingPage() {
   const [mode, setMode] = useState<"nep" | "mocap">("nep");
   const [distillation, setDistillation] = useState("teacher_student");
   const [backend, setBackend] = useState<"synthetic" | "isaaclab_teacher_ppo">("synthetic");
-  const [numEnvs, setNumEnvs] = useState("32");
-  const [updates, setUpdates] = useState("5");
-  const [rolloutSteps, setRolloutSteps] = useState("128");
+  // Keep defaults small so the "real PPO" path completes quickly on a single GPU workstation.
+  const [numEnvs, setNumEnvs] = useState("8");
+  const [updates, setUpdates] = useState("2");
+  const [rolloutSteps, setRolloutSteps] = useState("64");
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);

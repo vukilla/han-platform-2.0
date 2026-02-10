@@ -120,7 +120,7 @@ echo "== Start XMimic job (GPU queue, Isaac Lab teacher PPO) =="
 XMIMIC_JSON="$(curl -sS -X POST "$API_URL/datasets/$DATASET_ID/xmimic/run" \
   -H "Content-Type: application/json" \
   -H "$AUTH_HEADER" \
-  -d "{\"mode\":\"$MODE\",\"params_json\":{\"backend\":\"isaaclab_teacher_ppo\",\"env_task\":\"cargo_pickup_v0\",\"isaaclab_task\":\"cargo_pickup_franka\",\"num_envs\":32,\"updates\":5,\"rollout_steps\":128}}")"
+  -d "{\"mode\":\"$MODE\",\"params_json\":{\"backend\":\"isaaclab_teacher_ppo\",\"env_task\":\"cargo_pickup_v0\",\"isaaclab_task\":\"cargo_pickup_franka\",\"num_envs\":8,\"updates\":2,\"rollout_steps\":64}}")"
 XMIMIC_JOB_ID="$(printf '%s' "$XMIMIC_JSON" | json_get 'id')"
 
 echo "== Poll XMimic job (real PPO, requires Windows GPU worker) =="
@@ -173,4 +173,3 @@ If XMimic timed out:
 - Start the Windows GPU worker:
   scripts\\windows\\start_gpu_worker_detached.ps1 -MacIp <MAC_LAN_IP>
 EOF
-
