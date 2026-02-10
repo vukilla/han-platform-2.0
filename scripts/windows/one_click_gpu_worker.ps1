@@ -10,6 +10,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\\..")
 $bootstrap = Join-Path $repoRoot "scripts\\windows\\bootstrap_isaaclab.ps1"
 $startDetached = Join-Path $repoRoot "scripts\\windows\\start_gpu_worker_detached.ps1"
+$stopWorker = Join-Path $repoRoot "scripts\\windows\\stop_gpu_worker.ps1"
 $isaacLabBat = Join-Path $repoRoot "external\\isaaclab\\isaaclab.bat"
 
 Write-Host "== One-click GPU worker (Windows) ==" -ForegroundColor Cyan
@@ -54,6 +55,15 @@ Assert-TcpPort -ComputerName $MacIp -Port 9000 -Label "MinIO (S3)"
 Assert-TcpPort -ComputerName $MacIp -Port 5432 -Label "Postgres"
 
 Write-Host ""
+if (Test-Path $stopWorker) {
+  Write-Host "-- Stopping any existing GPU worker (best-effort) --" -ForegroundColor Cyan
+  try {
+    powershell -NoProfile -ExecutionPolicy Bypass -File $stopWorker
+  } catch {
+    Write-Host "[WARN] Failed to stop existing worker: $($_.Exception.Message)" -ForegroundColor Yellow
+  }
+  Write-Host ""
+}
 Write-Host "-- Starting GPU worker (detached) --" -ForegroundColor Cyan
 powershell -NoProfile -ExecutionPolicy Bypass -File $startDetached -MacIp $MacIp
 
