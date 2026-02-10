@@ -288,6 +288,13 @@ export default function JobProgressPage() {
               <p className="text-sm font-semibold text-black/60">GVHMR preview</p>
               {posePreview ? (
                 <video className="w-full rounded-2xl border border-black/10 bg-black" controls playsInline src={posePreview} />
+              ) : demoVideo ? (
+                <div className="relative">
+                  <video className="w-full rounded-2xl border border-black/10 bg-black" controls playsInline src={demoVideo} />
+                  <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/40 p-4">
+                    <p className="text-sm font-semibold text-white">{previewMessage}</p>
+                  </div>
+                </div>
               ) : (
                 <div className="flex aspect-video items-center justify-center rounded-2xl border border-black/10 bg-black/[0.04] p-4">
                   <p className="text-sm text-black/60">{previewMessage}</p>
