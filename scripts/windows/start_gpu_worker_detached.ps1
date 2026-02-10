@@ -24,22 +24,17 @@ Write-Host "Stdout:    $outLog"
 Write-Host "Stderr:    $errLog"
 Write-Host ""
 
-$args = @(
-  "-NoProfile",
-  "-ExecutionPolicy", "Bypass",
-  "-File", $runScript,
-  "-MacIp", $MacIp
-)
-
-Start-Process `
-  -FilePath "powershell.exe" `
-  -ArgumentList $args `
-  -WorkingDirectory $repoRoot `
-  -RedirectStandardOutput $outLog `
-  -RedirectStandardError $errLog `
-  -WindowStyle Hidden | Out-Null
+# NOTE:
+# When invoked over Windows OpenSSH, child processes may get terminated when the SSH session exits
+# (Job object semantics). Using `cmd.exe /c start ...` is more reliable at truly detaching.
+#
+# We do redirection at the CMD level so we still capture errors if PowerShell fails to parse/launch.
+$cmdLine = @(
+  "start `"han-gpu-worker`" /min cmd.exe /c",
+  "`"powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$runScript`" -MacIp `"$MacIp`" 1>> `"$outLog`" 2>> `"$errLog`"`""
+) -join " "
+cmd.exe /c $cmdLine | Out-Null
 
 Write-Host "Started. Tail logs with:" -ForegroundColor Green
 Write-Host "  Get-Content -Path `"$outLog`" -Wait"
 Write-Host "  Get-Content -Path `"$errLog`" -Wait"
-
