@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { getDemo, getXgenJob, runXmimic, DemoOut, XGenJobOut } from "@/lib/api";
+import { getDemo, getXgenJob, requeueXgenJob, runXmimic, DemoOut, XGenJobOut } from "@/lib/api";
 
 const DEFAULT_ISAACLAB_NUM_ENVS = 8;
 const DEFAULT_ISAACLAB_UPDATES = 2;
@@ -43,6 +43,7 @@ export default function JobProgressPage() {
   const [trainError, setTrainError] = useState<string | null>(null);
   const [xmimicJobId, setXmimicJobId] = useState<string | null>(null);
   const autoTrainTriggered = useRef(false);
+  const [requeueStatus, setRequeueStatus] = useState<string | null>(null);
 
   useEffect(() => {
     let timer: NodeJS.Timeout | null = null;
@@ -89,6 +90,7 @@ export default function JobProgressPage() {
   const status = job?.status ?? null;
   const jobIsComplete = status === "COMPLETED";
   const jobIsFailed = status === "FAILED";
+  const jobIsQueued = status === "QUEUED";
   const datasetId = typeof job?.params_json?.dataset_id === "string" ? job?.params_json?.dataset_id : null;
   const onlyPose = Boolean(job?.params_json?.only_pose);
   const stages = onlyPose ? (["INGEST_VIDEO", "ESTIMATE_POSE", "RENDER_PREVIEWS"] as const) : fullStages;
@@ -174,6 +176,17 @@ export default function JobProgressPage() {
       ? (job.params_json.pose_preview_mp4_uri as string)
       : null;
   const demoVideo = demo?.video_uri ?? null;
+  const previewMessage = jobIsComplete
+    ? poseOk === false
+      ? "GVHMR fell back to a placeholder pose (no preview video). See the pose log below."
+      : "Pose preview not available yet. See the pose log below if this persists."
+    : jobIsFailed
+      ? "Pose preview failed. See the worker error/logs."
+      : status === "ESTIMATE_POSE"
+        ? "GVHMR running..."
+        : status === "RENDER_PREVIEWS"
+          ? "Rendering preview..."
+          : "Waiting for pose preview...";
 
   const currentIndex = status ? stages.indexOf(status) : -1;
   const stageLabel = (index: number) => {
@@ -186,6 +199,18 @@ export default function JobProgressPage() {
   };
 
   const waitingForWorker = !jobIsComplete && !jobIsFailed && currentIndex === -1;
+
+  async function handleRequeue() {
+    if (!jobId) return;
+    setRequeueStatus("Requeuing...");
+    try {
+      await requeueXgenJob(jobId);
+      setRequeueStatus("Requeued. This page will update automatically.");
+    } catch (err) {
+      setRequeueStatus(null);
+      setError(err instanceof Error ? err.message : "Failed to requeue job");
+    }
+  }
 
   return (
     <div className="space-y-8">
@@ -222,6 +247,19 @@ export default function JobProgressPage() {
         </Card>
       ) : null}
 
+      {onlyPose && jobIsQueued && !job?.started_at && gpuReady !== false ? (
+        <Card className="space-y-2">
+          <h2 className="text-lg font-semibold text-black">Job is queued</h2>
+          <p className="text-sm text-black/70">
+            If you restarted Docker/Redis on your Mac, queued jobs can be lost. Requeue to start processing now.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button onClick={handleRequeue}>Requeue job</Button>
+            {requeueStatus ? <span className="text-sm text-black/70">{requeueStatus}</span> : null}
+          </div>
+        </Card>
+      ) : null}
+
       <Card className="space-y-6">
         {stages.map((stage, index) => (
           <div key={stage} className="flex items-center justify-between border-b border-black/10 pb-4 last:border-none last:pb-0">
@@ -249,26 +287,11 @@ export default function JobProgressPage() {
             <div className="space-y-2">
               <p className="text-sm font-semibold text-black/60">GVHMR preview</p>
               {posePreview ? (
-                <video
-                  className="w-full rounded-2xl border border-black/10 bg-black"
-                  controls
-                  playsInline
-                  src={posePreview}
-                />
+                <video className="w-full rounded-2xl border border-black/10 bg-black" controls playsInline src={posePreview} />
               ) : (
-                <p className="text-sm text-black/60">
-                  {jobIsComplete
-                    ? poseOk === false
-                      ? "GVHMR fell back to a placeholder pose (no preview video). See the pose log below."
-                      : "Pose preview not available yet. See the pose log below if this persists."
-                    : jobIsFailed
-                      ? "Pose preview failed. See the worker error/logs."
-                      : status === "ESTIMATE_POSE"
-                        ? "GVHMR running..."
-                        : status === "RENDER_PREVIEWS"
-                          ? "Rendering preview..."
-                          : "Waiting for pose preview..."}
-                </p>
+                <div className="flex aspect-video items-center justify-center rounded-2xl border border-black/10 bg-black/[0.04] p-4">
+                  <p className="text-sm text-black/60">{previewMessage}</p>
+                </div>
               )}
             </div>
           </div>

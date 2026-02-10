@@ -42,6 +42,9 @@ Optional one-command smoke tests:
 This is the simplest “phone video -> 3D motion” UX loop.
 
 1. Ensure the Windows GPU worker is running (see below).
+1. One-time: upload the licensed SMPL-X model file (`SMPLX_NEUTRAL.npz`) so GVHMR can run end-to-end:
+1. Open `http://localhost:3000/gvhmr`
+1. If it shows `SMPL-X model missing`, upload the `.npz` file (see `docs/GVHMR.md` for where to download it).
 1. Open `http://localhost:3000/gvhmr`
 1. Choose an `.mp4` (10-20s recommended).
 1. Leave defaults:

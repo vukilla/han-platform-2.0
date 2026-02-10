@@ -67,6 +67,11 @@ class AuthLoginResponse(BaseModel):
     token: str
 
 
+class GVHMRSmplxModelStatus(BaseModel):
+    key: str
+    exists: bool
+
+
 @router.post("/auth/login", response_model=AuthLoginResponse)
 def login(payload: AuthLoginRequest, db: Session = Depends(get_db)):
     user = crud.get_user_by_email(db, payload.email)
@@ -79,6 +84,46 @@ def login(payload: AuthLoginRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=schemas.UserOut)
 def me(current_user: models.User = Depends(get_current_user)):
     return current_user
+
+
+@router.get("/admin/gvhmr/smplx-model", response_model=GVHMRSmplxModelStatus)
+def gvhmr_smplx_model_status(
+    current_user: models.User = Depends(get_current_user),  # noqa: ARG001
+):
+    key = "gvhmr/body_models/smplx/SMPLX_NEUTRAL.npz"
+    # Treat "exists" as best-effort (MinIO might be down during startup).
+    try:
+        client = get_s3_client()
+        client.head_object(Bucket=settings.s3_bucket, Key=key)
+        exists = True
+    except Exception:
+        exists = False
+    return GVHMRSmplxModelStatus(key=key, exists=exists)
+
+
+@router.post("/admin/gvhmr/smplx-model", response_model=GVHMRSmplxModelStatus)
+def upload_gvhmr_smplx_model(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),  # noqa: ARG001
+    current_user: models.User = Depends(get_current_user),  # noqa: ARG001
+):
+    """Upload the licensed SMPL-X model file needed by GVHMR.
+
+    This avoids manual placement on the Windows GPU worker. The worker will pull it from MinIO
+    when missing and then GVHMR pose extraction will produce a real 3D skeleton preview.
+    """
+    key = "gvhmr/body_models/smplx/SMPLX_NEUTRAL.npz"
+    payload = file.file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Empty upload")
+    client = get_s3_client()
+    client.put_object(
+        Bucket=settings.s3_bucket,
+        Key=key,
+        Body=payload,
+        ContentType=file.content_type or "application/octet-stream",
+    )
+    return GVHMRSmplxModelStatus(key=key, exists=True)
 
 
 @router.post("/projects", response_model=schemas.ProjectOut)
@@ -287,6 +332,50 @@ def get_xgen_job(job_id: UUID, db: Session = Depends(get_db)):
     job = crud.get_xgen_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    out = schemas.XGenJobOut.model_validate(job)
+    out.logs_uri = _presign_maybe(out.logs_uri)
+    out.params_json = _presign_params_json(out.params_json)
+    return out
+
+
+@router.post("/xgen/jobs/{job_id}/requeue", response_model=schemas.XGenJobOut)
+def requeue_xgen_job(
+    job_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),  # noqa: ARG001
+):
+    """Re-enqueue a job that is stuck in QUEUED (e.g., after Redis/container restarts)."""
+    job = crud.get_xgen_job(db, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Reset job state so the worker can start from scratch.
+    job.status = "QUEUED"
+    job.started_at = None
+    job.finished_at = None
+    job.error = None
+    job.logs_uri = None
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    params = job.params_json or {}
+    requires_gpu = bool(params.get("requires_gpu", False))
+    pose_only = bool(params.get("only_pose", False))
+    pose_estimator = str(params.get("pose_estimator") or "").strip().lower()
+
+    if requires_gpu and pose_only and pose_estimator == "gvhmr":
+        queue_name = settings.celery_pose_queue
+        max_depth = settings.celery_max_queue_pose
+    else:
+        queue_name = settings.celery_gpu_queue if requires_gpu else settings.celery_cpu_queue
+        max_depth = settings.celery_max_queue_gpu if requires_gpu else settings.celery_max_queue_cpu
+
+    if is_queue_full(queue_name, max_depth):
+        raise HTTPException(status_code=429, detail=f"Queue {queue_name} is at capacity")
+
+    run_xgen_job.apply_async(args=[str(job.id)], queue=queue_name)
+
     out = schemas.XGenJobOut.model_validate(job)
     out.logs_uri = _presign_maybe(out.logs_uri)
     out.params_json = _presign_params_json(out.params_json)

@@ -4,6 +4,19 @@
 - Laptop local stack is running: `docker compose up` (Postgres/Redis/MinIO/API/worker/web)
 - API health check passes: `GET http://localhost:8000/health`
 - Web dev server loads (fixed linux native deps by isolating container `node_modules` volume)
+- Automation run (2026-02-10):
+  - `apps/web` lint clean (`npm run lint`).
+  - API compile check clean (`python -m compileall -q apps/api/app`).
+  - `./scripts/smoke_local_e2e.sh` passed.
+  - Windows GPU worker started via SSH (`scripts/mac/start_windows_gpu_worker_ssh.sh`).
+  - `./scripts/smoke_e2e_with_gpu_real.sh` launched; XMimic real PPO poll running (still in progress).
+  - GVHMR job page now keeps the preview column empty until the real 3D preview exists (avoids duplicate original video).
+- Job reliability improvements:
+  - Redis broker now persists queues via AOF + `redis-data` volume in `infra/docker-compose.yml` (prevents losing queued jobs on restarts).
+  - Added `POST /xgen/jobs/{id}/requeue` + Web UI button to recover jobs stuck in `QUEUED` (e.g., if a restart still happens).
+- GVHMR setup improvements:
+  - Added one-time upload endpoint for the licensed SMPL-X model file: `GET/POST /admin/gvhmr/smplx-model`.
+  - `/gvhmr` page shows SMPL-X status and can upload `SMPLX_NEUTRAL.npz`; the Windows GPU worker pulls it automatically on demand.
 - Large external artifacts live inside the repo under `external/humanoid-projects/` (no separate `~/humanoid-projects` required on laptop)
 - Browser upload UX is reliable (no MinIO CORS required):
   - `POST /demos/{id}/upload` streams the video to MinIO

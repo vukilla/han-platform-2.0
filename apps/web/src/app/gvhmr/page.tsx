@@ -5,7 +5,17 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { createDemo, createProject, listProjects, login, runXgen, uploadDemoVideo } from "@/lib/api";
+import {
+  createDemo,
+  createProject,
+  getGvhmrSmplxModelStatus,
+  login,
+  listProjects,
+  runXgen,
+  uploadDemoVideo,
+  uploadGvhmrSmplxModel,
+  GVHMRSmplxModelStatus,
+} from "@/lib/api";
 import { getToken, setToken } from "@/lib/auth";
 
 export default function GVHMRPage() {
@@ -15,6 +25,9 @@ export default function GVHMRPage() {
   const [gvhmrStaticCam, setGvhmrStaticCam] = useState(true);
   const [quickTrim, setQuickTrim] = useState(true);
   const [gpuReady, setGpuReady] = useState<boolean | null>(null);
+  const [smplxStatus, setSmplxStatus] = useState<GVHMRSmplxModelStatus | null>(null);
+  const [smplxFile, setSmplxFile] = useState<File | null>(null);
+  const [smplxUploadStatus, setSmplxUploadStatus] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,6 +59,41 @@ export default function GVHMRPage() {
     if (getToken()) return;
     const resp = await login("demo@humanx.local", "Demo");
     setToken(resp.token);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        await ensureLoggedIn();
+        const status = await getGvhmrSmplxModelStatus();
+        if (!cancelled) setSmplxStatus(status);
+      } catch {
+        if (!cancelled) setSmplxStatus(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleUploadSmplx() {
+    setSmplxUploadStatus(null);
+    setError(null);
+    if (!smplxFile) {
+      setError("Select `SMPLX_NEUTRAL.npz` first.");
+      return;
+    }
+    try {
+      await ensureLoggedIn();
+      setSmplxUploadStatus("Uploading SMPL-X model...");
+      const status = await uploadGvhmrSmplxModel(smplxFile);
+      setSmplxStatus(status);
+      setSmplxUploadStatus("Uploaded. New GVHMR runs will produce a real 3D preview.");
+    } catch (err) {
+      setSmplxUploadStatus(null);
+      setError(err instanceof Error ? err.message : "Failed to upload SMPL-X model");
+    }
   }
 
   async function handleRun() {
@@ -107,11 +155,46 @@ export default function GVHMRPage() {
       <Card className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-xl font-semibold text-black">Upload</h2>
-          <Badge
-            label={gpuReady === true ? "GPU worker connected" : gpuReady === false ? "GPU worker offline" : "GPU status unknown"}
-            tone={gpuReady === true ? "emerald" : gpuReady === false ? "rose" : "amber"}
-          />
+          <div className="flex flex-wrap items-center gap-3">
+            <Badge
+              label={gpuReady === true ? "GPU worker connected" : gpuReady === false ? "GPU worker offline" : "GPU status unknown"}
+              tone={gpuReady === true ? "emerald" : gpuReady === false ? "rose" : "amber"}
+            />
+            <Badge
+              label={
+                smplxStatus?.exists === true
+                  ? "SMPL-X model uploaded"
+                  : smplxStatus?.exists === false
+                    ? "SMPL-X model missing"
+                    : "SMPL-X status unknown"
+              }
+              tone={smplxStatus?.exists === true ? "emerald" : smplxStatus?.exists === false ? "rose" : "amber"}
+            />
+          </div>
         </div>
+
+        {smplxStatus?.exists === false ? (
+          <div className="space-y-2 rounded-2xl border border-black/10 bg-black/[0.02] p-4">
+            <p className="text-sm font-semibold text-black">One-time setup: SMPL-X model file</p>
+            <p className="text-sm text-black/70">
+              To generate the real 3D skeleton preview, upload the licensed file <span className="font-mono">SMPLX_NEUTRAL.npz</span>.
+              See <span className="font-mono">docs/GVHMR.md</span> for where to download it.
+            </p>
+            <input
+              type="file"
+              accept=".npz"
+              onChange={(event) => setSmplxFile(event.target.files?.[0] ?? null)}
+              className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+            />
+            <div className="flex flex-wrap items-center gap-3">
+              <Button onClick={handleUploadSmplx} disabled={!smplxFile}>
+                Upload SMPL-X model
+              </Button>
+              {smplxUploadStatus ? <span className="text-sm text-black/70">{smplxUploadStatus}</span> : null}
+            </div>
+          </div>
+        ) : null}
+
         <input
           type="file"
           accept="video/*"

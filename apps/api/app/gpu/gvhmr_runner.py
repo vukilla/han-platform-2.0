@@ -130,7 +130,12 @@ def _ensure_checkpoints(gvhmr_root: Path, *, require_dpvo: bool) -> None:
             + "\n".join(f"- {p}" for p in missing)
             + "\n\n"
             "This includes the SMPL-X model file `SMPLX_NEUTRAL.npz` (licensed; you must download it separately)\n"
-            f"and place it under: {smplx_hint}\n"
+            f"and place it under: {smplx_hint}\n\n"
+            "Tip: for the platform flow, you can upload this file once via the Web UI (`/gvhmr`) or API:\n"
+            "  POST /admin/gvhmr/smplx-model\n"
+            "It will be stored under the object-storage key:\n"
+            "  gvhmr/body_models/smplx/SMPLX_NEUTRAL.npz\n"
+            "and the Windows GPU worker will pull it into the staged checkpoints folder automatically.\n\n"
             "See docs/GVHMR.md for details."
         )
 
@@ -155,10 +160,9 @@ def _load_smpl_params(results_path: Path) -> dict[str, Any]:
 
 
 def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Path) -> dict[str, Any]:
-    """Create a lightweight side-by-side preview video without PyTorch3D renderer.
+    """Create a lightweight skeleton preview video without PyTorch3D renderer.
 
-    Left: original video
-    Right: a simple 3D-looking skeleton render from the recovered SMPL-X motion.
+    Output is a skeleton-only MP4. The Web UI shows it side-by-side with the original video.
 
     This is intentionally a fallback preview: GVHMR's official mesh renderer depends on
     PyTorch3D renderer components that are painful to install on Windows. The skeleton
@@ -244,7 +248,9 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
     if w_in <= 0 or h_in <= 0:
         w_in, h_in = 640, 360
 
-    target_h = 360
+    # Keep output aspect-ratio identical to the original video so the side-by-side UI aligns
+    # without awkward letterboxing or height mismatches.
+    target_h = min(720, int(h_in))
     scale = float(target_h) / float(h_in)
     target_w = max(1, int(round(w_in * scale)))
 
@@ -285,7 +291,7 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out_mp4_path.parent.mkdir(parents=True, exist_ok=True)
-    writer = cv2.VideoWriter(str(out_mp4_path), fourcc, fps_out, (target_w + skel_w, target_h))
+    writer = cv2.VideoWriter(str(out_mp4_path), fourcc, fps_out, (skel_w, skel_h))
     if not writer.isOpened():
         raise RuntimeError(f"Unable to create VideoWriter for: {out_mp4_path}")
 
@@ -300,8 +306,6 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
                 frame_idx += 1
                 continue
             frame_idx += 1
-
-            frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
 
             skel = np.zeros((skel_h, skel_w, 3), dtype=np.uint8)
             skel[:] = (14, 12, 10)
@@ -325,8 +329,7 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
                 cv2.LINE_AA,
             )
 
-            combined = np.concatenate([frame, skel], axis=1)
-            writer.write(combined)
+            writer.write(skel)
     finally:
         cap.release()
         writer.release()

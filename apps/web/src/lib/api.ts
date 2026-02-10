@@ -35,6 +35,37 @@ export async function login(email: string, name?: string) {
   });
 }
 
+export type GVHMRSmplxModelStatus = {
+  key: string;
+  exists: boolean;
+};
+
+export async function getGvhmrSmplxModelStatus() {
+  return apiFetch<GVHMRSmplxModelStatus>(`/admin/gvhmr/smplx-model`);
+}
+
+export async function uploadGvhmrSmplxModel(file: File) {
+  const token = getToken();
+  const headers = new Headers();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const form = new FormData();
+  form.append("file", file);
+
+  const response = await fetch(`${API_URL}/admin/gvhmr/smplx-model`, {
+    method: "POST",
+    headers,
+    body: form,
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || response.statusText);
+  }
+  return response.json() as Promise<GVHMRSmplxModelStatus>;
+}
+
 export async function createProject(name: string, description?: string) {
   return apiFetch<{ id: string; name: string }>("/projects", {
     method: "POST",
@@ -134,6 +165,12 @@ export type XGenJobOut = {
 
 export async function getXgenJob(jobId: string) {
   return apiFetch<XGenJobOut>(`/xgen/jobs/${jobId}`);
+}
+
+export async function requeueXgenJob(jobId: string) {
+  return apiFetch<XGenJobOut>(`/xgen/jobs/${jobId}/requeue`, {
+    method: "POST",
+  });
 }
 
 export type DatasetOut = {

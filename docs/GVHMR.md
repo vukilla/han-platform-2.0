@@ -24,7 +24,16 @@ GVHMR expects the SMPL-X body model file:
 - `inputs/checkpoints/body_models/smplx/SMPLX_NEUTRAL.npz`
 
 This file is **licensed** and is not distributed with this repository or with the GVHMR checkpoints.
-You must download it from the official SMPL-X model distribution and place it at:
+You must download it from the official SMPL-X model distribution.
+
+Recommended: upload it once via the platform (avoids manual placement on the Windows GPU worker):
+- Web UI: `http://localhost:3000/gvhmr` (one-time setup section)
+- API: `POST /admin/gvhmr/smplx-model` (multipart form field `file`)
+
+It will be stored in object storage under:
+- `gvhmr/body_models/smplx/SMPLX_NEUTRAL.npz`
+
+The Windows GPU worker will pull it into the staged checkpoints folder automatically:
 - `external/humanoid-projects/GVHMR/inputs/checkpoints/body_models/smplx/SMPLX_NEUTRAL.npz`
 
 The platform's GVHMR wrapper will symlink/copy staged checkpoints into:

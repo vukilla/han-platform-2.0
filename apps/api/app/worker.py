@@ -406,6 +406,32 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
     out_dir = tmp_root / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # If the SMPL-X model was uploaded via the API (`/admin/gvhmr/smplx-model`), pull it into the
+    # staged checkpoint folder on the GPU worker. This keeps the GVHMR setup "one-click" from the Web UI.
+    try:
+        repo_root = Path(__file__).resolve().parents[3]
+        staged = (
+            repo_root
+            / "external"
+            / "humanoid-projects"
+            / "GVHMR"
+            / "inputs"
+            / "checkpoints"
+            / "body_models"
+            / "smplx"
+            / "SMPLX_NEUTRAL.npz"
+        )
+        if not staged.exists():
+            staged.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                download_file("gvhmr/body_models/smplx/SMPLX_NEUTRAL.npz", staged)
+            except Exception:
+                # Best-effort: if the file isn't present in object storage, GVHMR will fail with a
+                # clear error message and the platform will fall back to a placeholder pose.
+                pass
+    except Exception:
+        pass
+
     static_cam = bool(params.get("gvhmr_static_cam", True))
     use_dpvo = bool(params.get("gvhmr_use_dpvo", False))
     f_mm = params.get("gvhmr_f_mm", None)
@@ -486,6 +512,10 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
         upload_file(pose_meta_key, meta_path, content_type="application/json")
         if preview_path and preview_path.exists():
             pose_preview_uri = upload_file(pose_preview_key, preview_path, content_type="video/mp4")
+        if pose_preview_uri is None:
+            # Always provide *some* preview asset to the Web UI. If the skeleton render
+            # failed for any reason, fall back to the original video.
+            pose_preview_uri = video_uri
     else:
         # If real GVHMR pose extraction fails (most commonly due to missing licensed SMPL-X model files),
         # fall back to a placeholder pose so the platform can still complete the end-to-end "golden path".
@@ -529,7 +559,9 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
         upload_file(pose_npz_key, placeholder_npz, content_type="application/octet-stream")
         upload_file(pose_meta_key, placeholder_meta, content_type="application/json")
 
-        # Best-effort placeholder preview: original video on the left, error banner on the right.
+        # Best-effort placeholder preview: error banner only (same aspect-ratio as the input video).
+        # The Web UI already shows the original video in the left panel. Keeping the banner-only
+        # preview avoids aspect-ratio mismatches (e.g., when concatenating 2 panels into 1 MP4).
         try:
             import cv2
             import numpy as np
@@ -538,51 +570,58 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
             fps_in = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
             w_in = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 640)
             h_in = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 360)
+            cap.release()
 
-            target_h = 360
+            target_h = min(720, int(h_in))
             scale = float(target_h) / float(max(1, h_in))
             target_w = max(1, int(round(w_in * scale)))
 
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             preview_out = out_dir / "gvhmr_preview.mp4"
-            writer = cv2.VideoWriter(str(preview_out), fourcc, fps_in, (target_w * 2, target_h))
+            writer = cv2.VideoWriter(str(preview_out), fourcc, fps_in, (target_w, target_h))
             if writer.isOpened():
-                frame_count = 0
-                while frame_count < 240:  # cap preview to ~8s @30fps
-                    ok_frame, frame = cap.read()
-                    if not ok_frame:
-                        break
-                    frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
-                    right = np.zeros((target_h, target_w, 3), dtype=np.uint8)
-                    right[:] = (14, 12, 10)
-                    cv2.putText(
-                        right,
-                        "GVHMR failed",
-                        (16, 64),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1.2,
-                        (80, 120, 255),
-                        3,
-                        cv2.LINE_AA,
-                    )
-                    cv2.putText(
-                        right,
-                        "See logs for details",
-                        (16, 110),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8,
-                        (235, 235, 235),
-                        2,
-                        cv2.LINE_AA,
-                    )
-                    combined = np.concatenate([frame, right], axis=1)
-                    writer.write(combined)
-                    frame_count += 1
+                banner = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+                banner[:] = (14, 12, 10)
+                cv2.putText(
+                    banner,
+                    "GVHMR failed",
+                    (16, 64),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1.2,
+                    (80, 120, 255),
+                    3,
+                    cv2.LINE_AA,
+                )
+                cv2.putText(
+                    banner,
+                    "Upload SMPLX_NEUTRAL.npz in /gvhmr",
+                    (16, 110),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (235, 235, 235),
+                    2,
+                    cv2.LINE_AA,
+                )
+                cv2.putText(
+                    banner,
+                    "then requeue this job",
+                    (16, 145),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (235, 235, 235),
+                    2,
+                    cv2.LINE_AA,
+                )
+
+                frames_out = int(min(240, max(1, round(fps_in * 6.0))))
+                for _ in range(frames_out):
+                    writer.write(banner)
                 writer.release()
                 pose_preview_uri = upload_file(pose_preview_key, preview_out, content_type="video/mp4")
-            cap.release()
         except Exception:
             pose_preview_uri = None
+        if pose_preview_uri is None:
+            pose_preview_uri = video_uri
 
     return {
         "pose_estimator": "gvhmr",
