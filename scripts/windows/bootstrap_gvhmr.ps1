@@ -96,21 +96,10 @@ if ($GvhmrRef) {
 }
 
 Write-Host "-- Applying Windows compatibility patch (idempotent) --" -ForegroundColor Cyan
-$demoPy = Join-Path $gvhmrDir "tools\\demo\\demo.py"
-if (-not (Test-Path $demoPy)) {
-  throw "GVHMR demo.py not found at: $demoPy"
-}
-$hasSkipRender = $false
-try {
-  $hasSkipRender = Select-String -Path $demoPy -Pattern "skip_render" -Quiet
-} catch {
-  $hasSkipRender = $false
-}
-if (-not $hasSkipRender) {
-  Invoke-CmdChecked "git -C `"$gvhmrDir`" apply `"$patchFile`""
-} else {
-  Write-Host "Patch appears already applied (demo.py contains skip_render)." -ForegroundColor Green
-}
+# Reset the working tree so we can re-apply the patch even if the repo was patched previously.
+# This keeps the bootstrap deterministic (we pin a ref and always apply our patch).
+Invoke-CmdChecked "git -C `"$gvhmrDir`" reset --hard"
+Invoke-CmdChecked "git -C `"$gvhmrDir`" apply `"$patchFile`""
 
 Write-Host "-- Installing pytorch3d stub into GVHMR repo --" -ForegroundColor Cyan
 if (Test-Path $stubDst) {
