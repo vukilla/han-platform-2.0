@@ -146,7 +146,11 @@ def train_teacher_ppo(
         log(f"[isaacsim] launching headless SimulationApp device={cfg.device}")
         from isaacsim import SimulationApp
 
-        simulation_app = SimulationApp({"headless": True})
+        # NOTE:
+        # Isaac Sim defaults to `fast_shutdown=true` in some experiences, and `SimulationApp.close()`
+        # can terminate the entire process before Python unwinds (which breaks subprocess callers).
+        # Disabling fast shutdown makes shutdown more predictable.
+        simulation_app = SimulationApp({"headless": True, "fast_shutdown": False})
 
     try:
         # Import Isaac Lab only after SimulationApp is live.
