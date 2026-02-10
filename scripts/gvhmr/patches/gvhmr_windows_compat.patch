@@ -72,6 +72,35 @@ index 6ef3897..55c80e8 100644
  
  try:
      from hmr4d.utils.preproc.slam import SLAMModel
+diff --git a/hmr4d/utils/preproc/tracker.py b/hmr4d/utils/preproc/tracker.py
+index b093ed4..3160c56 100644
+--- a/hmr4d/utils/preproc/tracker.py
++++ b/hmr4d/utils/preproc/tracker.py
+@@ -16,9 +16,24 @@ from hmr4d.utils.video_io_utils import get_video_lwh
+ from hmr4d.utils.net_utils import moving_average_smooth
+ 
+ 
++def _allowlist_ultralytics_safe_globals() -> None:
++    # PyTorch 2.6+ defaults `torch.load(..., weights_only=True)` and uses a restricted
++    # unpickler. Ultralytics checkpoints reference their model classes, so we must
++    # allowlist them for safe loading on newer torch versions.
++    try:
++        from ultralytics.nn.tasks import DetectionModel  # type: ignore
++
++        torch.serialization.add_safe_globals([DetectionModel])
++    except Exception:
++        # Best-effort: if the import path changes, Ultralytics may still work, or will
++        # fail with a clearer error prompting manual allowlisting.
++        return
++
++
+ class Tracker:
+     def __init__(self) -> None:
+         # https://docs.ultralytics.com/modes/predict/
++        _allowlist_ultralytics_safe_globals()
+         self.yolo = YOLO(PROJ_ROOT / "inputs/checkpoints/yolo/yolov8x.pt")
+ 
+     def track(self, video_path):
 diff --git a/hmr4d/utils/vis/renderer.py b/hmr4d/utils/vis/renderer.py
 index f4d6232..0f47a5a 100644
 --- a/hmr4d/utils/vis/renderer.py
