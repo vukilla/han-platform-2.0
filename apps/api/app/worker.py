@@ -208,27 +208,112 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
     if f_mm is not None:
         cmd.extend(["--f-mm", str(int(f_mm))])
 
-    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-    payload = json.loads((result.stdout or "").strip() or "{}")
-    npz_path = Path(payload["npz_path"])
-    meta_path = Path(payload["meta_path"])
+    result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    stdout = (result.stdout or "").strip()
+    payload: dict = {}
+    try:
+        payload = json.loads(stdout or "{}")
+    except Exception:
+        payload = {
+            "ok": False,
+            "error": "GVHMR runner did not emit valid JSON on stdout.",
+            "returncode": int(getattr(result, "returncode", 1) or 1),
+            "stdout_head": stdout[:4000],
+            "stderr_head": (result.stderr or "").strip()[:4000],
+        }
+
+    ok = bool(payload.get("ok", False)) and int(getattr(result, "returncode", 0) or 0) == 0
+    npz_path = Path(payload.get("npz_path", "")) if payload.get("npz_path") else None
+    meta_path = Path(payload.get("meta_path", "")) if payload.get("meta_path") else None
     gvhmr_log_path = Path(payload.get("gvhmr_log_path", "")) if payload.get("gvhmr_log_path") else None
 
     pose_npz_key = f"demos/{demo_id}/poses/{job_id}/gvhmr_smplx.npz"
     pose_meta_key = f"demos/{demo_id}/poses/{job_id}/gvhmr_meta.json"
     pose_log_key = f"demos/{demo_id}/poses/{job_id}/gvhmr.log"
 
-    upload_file(pose_npz_key, npz_path, content_type="application/octet-stream")
-    upload_file(pose_meta_key, meta_path, content_type="application/json")
+    # Always attempt to upload meta + log for debugging.
+    pose_log_uri = None
     if gvhmr_log_path and gvhmr_log_path.exists():
-        upload_file(pose_log_key, gvhmr_log_path, content_type="text/plain")
+        pose_log_uri = upload_file(pose_log_key, gvhmr_log_path, content_type="text/plain")
+    else:
+        # If GVHMR fails before producing gvhmr.log, capture stderr/stdout for visibility.
+        fallback_log = out_dir / "gvhmr.log"
+        try:
+            fallback_log.write_text(
+                "\n".join(
+                    [
+                        f"returncode={int(getattr(result, 'returncode', 1) or 1)}",
+                        "stdout:",
+                        stdout,
+                        "",
+                        "stderr:",
+                        (result.stderr or "").strip(),
+                        "",
+                        f"payload_error: {payload.get('error')}",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            pose_log_uri = upload_file(pose_log_key, fallback_log, content_type="text/plain")
+        except Exception:
+            pose_log_uri = None
+
+    pose_fallback = None
+    pose_error = None
+    if ok and npz_path and meta_path and npz_path.exists() and meta_path.exists():
+        upload_file(pose_npz_key, npz_path, content_type="application/octet-stream")
+        upload_file(pose_meta_key, meta_path, content_type="application/json")
+    else:
+        # If real GVHMR pose extraction fails (most commonly due to missing licensed SMPL-X model files),
+        # fall back to a placeholder pose so the platform can still complete the end-to-end "golden path".
+        # You can force failure by setting `params_json.fail_on_pose_error=true`.
+        fail_on_error = bool(params.get("fail_on_pose_error", False))
+        pose_error = str(payload.get("error") or f"GVHMR failed (exit={int(getattr(result, 'returncode', 1) or 1)})")
+        if fail_on_error:
+            raise RuntimeError(pose_error)
+
+        import numpy as np
+
+        pose_fallback = "placeholder"
+        t = int(params.get("frames", 1) or 1)
+        t = max(1, min(t, 10_000))
+
+        placeholder_npz = out_dir / "placeholder_smplx.npz"
+        # Minimal SMPL(-X)-like parameter set. Shapes are typical but not guaranteed to match any downstream model.
+        np.savez_compressed(
+            placeholder_npz,
+            global_orient=np.zeros((t, 3), dtype=np.float32),
+            body_pose=np.zeros((t, 63), dtype=np.float32),
+            betas=np.zeros((10,), dtype=np.float32),
+            transl=np.zeros((t, 3), dtype=np.float32),
+        )
+
+        placeholder_meta = out_dir / "placeholder_smplx_meta.json"
+        placeholder_meta.write_text(
+            json.dumps(
+                {
+                    "ok": False,
+                    "pose_fallback": "placeholder",
+                    "error": pose_error,
+                    "frames": t,
+                    "note": "GVHMR failed; placeholder pose generated so XGen can continue.",
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        upload_file(pose_npz_key, placeholder_npz, content_type="application/octet-stream")
+        upload_file(pose_meta_key, placeholder_meta, content_type="application/json")
 
     return {
         "pose_estimator": "gvhmr",
         "pose_smplx_npz_uri": pose_npz_key,
         "pose_meta_uri": pose_meta_key,
-        "pose_log_uri": pose_log_key if gvhmr_log_path and gvhmr_log_path.exists() else None,
-        "pose_ok": True,
+        "pose_log_uri": pose_log_uri,
+        "pose_ok": bool(ok),
+        "pose_fallback": pose_fallback,
+        "pose_error": pose_error,
     }
 
 
@@ -264,9 +349,15 @@ def run_xgen_job(self, job_id: str):
                         params=params,
                     )
                     params.update(pose_artifacts)
-                    log_lines.append(
-                        f"{datetime.utcnow().isoformat()}Z pose=gvhmr ok npz={pose_artifacts.get('pose_smplx_npz_uri')}"
-                    )
+                    if bool(pose_artifacts.get("pose_ok", False)):
+                        log_lines.append(
+                            f"{datetime.utcnow().isoformat()}Z pose=gvhmr ok npz={pose_artifacts.get('pose_smplx_npz_uri')}"
+                        )
+                    else:
+                        log_lines.append(
+                            f"{datetime.utcnow().isoformat()}Z pose=gvhmr failed fallback={pose_artifacts.get('pose_fallback')} "
+                            f"err={pose_artifacts.get('pose_error')}"
+                        )
                 else:
                     params["pose_ok"] = True
                     params["pose_estimator"] = "none"

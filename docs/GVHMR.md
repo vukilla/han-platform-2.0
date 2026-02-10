@@ -18,6 +18,20 @@ git clone https://github.com/zju3dv/GVHMR external/gvhmr
 
 Follow GVHMR's `docs/INSTALL.md` to install dependencies and download checkpoints.
 
+## Required SMPL-X Model File (Licensed)
+
+GVHMR expects the SMPL-X body model file:
+- `inputs/checkpoints/body_models/smplx/SMPLX_NEUTRAL.npz`
+
+This file is **licensed** and is not distributed with this repository or with the GVHMR checkpoints.
+You must download it from the official SMPL-X model distribution and place it at:
+- `external/humanoid-projects/GVHMR/inputs/checkpoints/body_models/smplx/SMPLX_NEUTRAL.npz`
+
+The platform's GVHMR wrapper will symlink/copy staged checkpoints into:
+- `external/gvhmr/inputs/checkpoints/...`
+
+If this file is missing, GVHMR pose extraction will fail.
+
 ### Windows-native setup (recommended)
 This repo supports running GVHMR on the **Windows GPU worker** (Isaac Sim + Isaac Lab Python):
 
@@ -51,6 +65,14 @@ The wrapper writes:
 And uploads to object storage (MinIO/S3):
 - `demos/<demo_id>/poses/<xgen_job_id>/gvhmr_smplx.npz`
 - `demos/<demo_id>/poses/<xgen_job_id>/gvhmr_meta.json`
+
+### Fallback behavior (platform)
+If GVHMR fails (commonly due to missing `SMPLX_NEUTRAL.npz`), the platform can fall back to a
+**placeholder SMPL-X NPZ** so the web app can still complete the end-to-end flow for debugging
+and UX validation.
+
+To force a hard failure instead (recommended once GVHMR is fully configured), set:
+- `params_json.fail_on_pose_error=true`
 
 ## Environment
 Optional env var:

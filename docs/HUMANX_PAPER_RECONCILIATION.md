@@ -33,10 +33,13 @@ PhysHOI baseline inference (GPU PC):
   - `assets/objects/cargo_box.urdf`
   - `services/xmimic/configs/robot_spec.yaml`
   - `services/xmimic/scripts/robot_spec_validate.py`
-- Isaac Sim / Isaac Lab parallel sim harness (MISSING; current code is Isaac Gym legacy)
-  - Legacy stub: `services/xmimic/xmimic/isaac/cargo_env.py`
-  - Planned: `services/xmimic/xmimic/isaaclab/...`
-  - Notes: `docs/ISAAC_LAB_MIGRATION.md`
+- Isaac Sim / Isaac Lab parallel sim harness (GPU-BLOCKED; Windows GPU worker required)
+  - Isaac Lab PPO baseline (real checkpoint artifact):
+    - `apps/api/app/gpu/isaaclab_teacher_ppo.py`
+    - Triggered via XMimic job params: `backend="isaaclab_teacher_ppo"`
+  - Notes:
+    - `docs/ISAACLAB_WINDOWS_SETUP.md`
+    - `docs/ISAAC_LAB_MIGRATION.md`
 
 ## 2) XGen (Video -> Physically Plausible Interaction Clips)
 
@@ -109,8 +112,10 @@ PhysHOI baseline inference (GPU PC):
 
 ## 3) XMimic Stage 1 (Teacher PPO, Privileged State, Unified Interaction Reward)
 
-- PPO actor-critic scaffold + BC hook (PARTIAL; not integrated with real sim env yet)
-  - `services/xmimic/xmimic/train/ppo.py`
+- PPO actor-critic scaffold + BC hook (PARTIAL)
+  - Paper-faithful imitation PPO lives under `services/xmimic/xmimic/train/` and is still being wired to a full humanoid env.
+  - A *real Isaac Lab PPO baseline* (task reward, not HumanX imitation reward) exists for GPU validation and checkpoint export:
+    - `apps/api/app/gpu/isaaclab_teacher_ppo.py`
 - Unified reward terms (PARTIAL; closer to equation-level parity but env wiring is still pending)
   - `services/xmimic/xmimic/rewards/unified.py`
   - `services/xmimic/configs/humanx_reward.yaml`

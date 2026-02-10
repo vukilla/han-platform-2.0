@@ -60,6 +60,20 @@ def _gvhmr_python_cmd() -> list[str]:
     return [sys.executable]
 
 
+def _required_checkpoint_relpaths(*, require_dpvo: bool) -> list[Path]:
+    required = [
+        Path("gvhmr") / "gvhmr_siga24_release.ckpt",
+        Path("vitpose") / "vitpose-h-multi-coco.pth",
+        Path("hmr2") / "epoch=10-step=25000.ckpt",
+        Path("yolo") / "yolov8x.pt",
+        # GVHMR also requires SMPL-X body model files (licensed; not distributed with this repo).
+        Path("body_models") / "smplx" / "SMPLX_NEUTRAL.npz",
+    ]
+    if require_dpvo:
+        required.insert(1, Path("dpvo") / "dpvo.pth")
+    return required
+
+
 def _ensure_checkpoints(gvhmr_root: Path, *, require_dpvo: bool) -> None:
     """Ensure `external/gvhmr/inputs/checkpoints` exists by linking staged checkpoints.
 
@@ -67,8 +81,8 @@ def _ensure_checkpoints(gvhmr_root: Path, *, require_dpvo: bool) -> None:
     `external/humanoid-projects/GVHMR/inputs/checkpoints`.
     """
     expected = gvhmr_root / "inputs" / "checkpoints"
-    required = expected / "gvhmr" / "gvhmr_siga24_release.ckpt"
-    if required.exists():
+    required_files = _required_checkpoint_relpaths(require_dpvo=require_dpvo)
+    if all((expected / rel).exists() for rel in required_files):
         return
 
     heavy = _resolve_heavy_checkpoints_root()
@@ -79,25 +93,24 @@ def _ensure_checkpoints(gvhmr_root: Path, *, require_dpvo: bool) -> None:
         )
 
     expected.parent.mkdir(parents=True, exist_ok=True)
-    if expected.exists():
-        # Don't delete user data. If the directory exists but is incomplete, let GVHMR fail with a clear error.
-        return
+    # If the expected directory already exists but is incomplete, try to copy missing files from the staged root.
+    if expected.exists() and expected.is_dir():
+        for rel in required_files:
+            src = heavy / rel
+            dst = expected / rel
+            if dst.exists():
+                continue
+            if not src.exists():
+                continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
 
     try:
-        os.symlink(heavy, expected, target_is_directory=True)
+        if not expected.exists():
+            os.symlink(heavy, expected, target_is_directory=True)
     except OSError:
         # Symlinks are often unavailable on Windows without Developer Mode or Administrator privileges.
         # Fall back to copying the required checkpoints. This is slower but robust.
-        required_files = [
-            Path("gvhmr") / "gvhmr_siga24_release.ckpt",
-            Path("vitpose") / "vitpose-h-multi-coco.pth",
-            Path("hmr2") / "epoch=10-step=25000.ckpt",
-            Path("yolo") / "yolov8x.pt",
-        ]
-        # DPVO is optional in GVHMR. Only require it when explicitly enabled.
-        if require_dpvo:
-            required_files.insert(1, Path("dpvo") / "dpvo.pth")
-
         expected.mkdir(parents=True, exist_ok=True)
         for rel in required_files:
             src = heavy / rel
@@ -108,6 +121,18 @@ def _ensure_checkpoints(gvhmr_root: Path, *, require_dpvo: bool) -> None:
                 raise FileNotFoundError(f"Missing checkpoint file: {src}")
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
+
+    missing = [str(expected / rel) for rel in required_files if not (expected / rel).exists()]
+    if missing:
+        smplx_hint = str(heavy / "body_models" / "smplx" / "SMPLX_NEUTRAL.npz")
+        raise FileNotFoundError(
+            "GVHMR required assets missing:\n"
+            + "\n".join(f"- {p}" for p in missing)
+            + "\n\n"
+            "This includes the SMPL-X model file `SMPLX_NEUTRAL.npz` (licensed; you must download it separately)\n"
+            f"and place it under: {smplx_hint}\n"
+            "See docs/GVHMR.md for details."
+        )
 
 
 def _find_hmr4d_results(output_root: Path, video_stem: str) -> Path:
@@ -129,7 +154,7 @@ def _load_smpl_params(results_path: Path) -> dict[str, Any]:
     return {"smpl_params_global": smpl_np}
 
 
-def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo: bool, f_mm: int | None) -> dict[str, str]:
+def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo: bool, f_mm: int | None) -> dict[str, Any]:
     gvhmr_root = _resolve_gvhmr_root()
     if not gvhmr_root.exists():
         raise FileNotFoundError(
@@ -167,7 +192,30 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
     # GVHMR can be very verbose; keep stdout clean so the parent process can parse our JSON result.
     gvhmr_log = output_dir / "gvhmr.log"
     with gvhmr_log.open("w", encoding="utf-8") as handle:
-        subprocess.run(cmd, check=True, cwd=str(gvhmr_root), env=env, stdout=handle, stderr=handle)
+        proc = subprocess.run(cmd, check=False, cwd=str(gvhmr_root), env=env, stdout=handle, stderr=handle)
+
+    meta_path = output_dir / f"{video_path.stem}_gvhmr_meta.json"
+    if proc.returncode != 0:
+        meta = {
+            "ok": False,
+            "video": str(video_path),
+            "output_root": str(output_root),
+            "gvhmr_log": str(gvhmr_log),
+            "returncode": int(proc.returncode),
+            "python_cmd": cmd[:3] if cmd[:2] == ["cmd.exe", "/c"] else cmd[:1],
+            "static_cam": bool(static_cam),
+            "use_dpvo": bool(use_dpvo),
+            "f_mm": int(f_mm) if f_mm is not None else None,
+            "error": f"GVHMR demo failed (exit={proc.returncode}). See gvhmr.log: {gvhmr_log}",
+        }
+        meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        return {
+            "ok": False,
+            "error": meta["error"],
+            "returncode": int(proc.returncode),
+            "meta_path": str(meta_path),
+            "gvhmr_log_path": str(gvhmr_log),
+        }
 
     results_path = _find_hmr4d_results(output_root, video_path.stem)
     payload = _load_smpl_params(results_path)
@@ -177,8 +225,8 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
     npz_path = output_dir / f"{video_path.stem}_gvhmr_smplx.npz"
     np.savez_compressed(npz_path, **payload["smpl_params_global"])
 
-    meta_path = output_dir / f"{video_path.stem}_gvhmr_meta.json"
     meta = {
+        "ok": True,
         "video": str(video_path),
         "results_path": str(results_path),
         "output_npz": str(npz_path),
@@ -191,6 +239,7 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
     meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
     return {
+        "ok": True,
         "npz_path": str(npz_path),
         "meta_path": str(meta_path),
         "results_path": str(results_path),
@@ -212,14 +261,26 @@ def main() -> None:
     if not video.exists():
         raise FileNotFoundError(f"Video not found: {video}")
 
-    result = run_gvhmr(
-        video,
-        out_dir,
-        static_cam=bool(args.static_cam),
-        use_dpvo=bool(args.use_dpvo),
-        f_mm=args.f_mm,
-    )
+    try:
+        result: dict[str, Any] = run_gvhmr(
+            video,
+            out_dir,
+            static_cam=bool(args.static_cam),
+            use_dpvo=bool(args.use_dpvo),
+            f_mm=args.f_mm,
+        )
+    except Exception as exc:
+        # Best-effort: emit structured JSON so parent processes can surface a useful error.
+        result = {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+        print(json.dumps(result))
+        raise SystemExit(1)
+
     print(json.dumps(result))
+    if not bool(result.get("ok", False)):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
