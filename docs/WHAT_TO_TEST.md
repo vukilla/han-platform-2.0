@@ -92,7 +92,7 @@ This will:
 
 What “success” means here:
 
-1. Video upload used a presigned URL and the object exists in MinIO.
+1. Video upload succeeded and the object exists in MinIO.
 1. XGen job progressed through all stages and completed.
 1. Dataset row + clip rows exist in Postgres.
 1. Clip `.npz` files and `dataset.zip` exist in object storage and download via presigned URL.
