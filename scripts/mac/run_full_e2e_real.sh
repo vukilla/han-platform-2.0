@@ -65,10 +65,11 @@ while true; do
   workers_json="$(curl -sS "http://localhost:8000/ops/workers?timeout=2.0" || true)"
 
   if (( now - last_print >= 10 )); then
-    python - <<'PY' || true
+    WORKERS_JSON="$workers_json" python - <<'PY' || true
 import json,sys
+import os
 try:
-  d=json.load(sys.stdin)
+  d=json.loads(os.environ.get("WORKERS_JSON") or "{}")
 except Exception:
   print("Workers: (unavailable)")
   raise SystemExit(0)
@@ -76,26 +77,27 @@ names=d.get("worker_names") or []
 has_gpu=bool(d.get("has_gpu_queue"))
 print(f"Workers: {names} gpu_queue={has_gpu}")
 PY
-    <<<"$workers_json"
     last_print=$now
   fi
 
-  ok="$(python - <<'PY'
+  ok="$(WORKERS_JSON="$workers_json" python - <<'PY'
 import json,sys
+import os
 try:
-  d=json.load(sys.stdin)
+  d=json.loads(os.environ.get("WORKERS_JSON") or "{}")
   print("1" if d.get("ok") else "0")
 except Exception:
   print("0")
 PY
-<<<"$workers_json")"
+)"
   if [[ "$ok" == "1" ]]; then
-    has_gpu="$(python - <<'PY'
+    has_gpu="$(WORKERS_JSON="$workers_json" python - <<'PY'
 import json,sys
-d=json.load(sys.stdin)
+import os
+d=json.loads(os.environ.get("WORKERS_JSON") or "{}")
 print("1" if d.get("has_gpu_queue") is True else "0")
 PY
-<<<"$workers_json")"
+)"
     if [[ "$has_gpu" == "1" ]]; then
       echo "GPU worker detected."
       break
