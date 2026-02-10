@@ -85,9 +85,26 @@ index b093ed4..3160c56 100644
 +    # unpickler. Ultralytics checkpoints reference their model classes, so we must
 +    # allowlist them for safe loading on newer torch versions.
 +    try:
-+        from ultralytics.nn.tasks import DetectionModel  # type: ignore
++        # In practice, the Ultralytics YOLOv8 weights are a trusted checkpoint
++        # (downloaded from Ultralytics releases). To keep GVHMR working on torch>=2.6,
++        # force `weights_only=False` by default.
++        import inspect
 +
-+        torch.serialization.add_safe_globals([DetectionModel])
++        if "weights_only" not in inspect.signature(torch.load).parameters:
++            return
++
++        if getattr(torch.load, "_han_ultralytics_patched", False):
++            return
++
++        _orig_torch_load = torch.load
++
++        def _torch_load_compat(*args, **kwargs):
++            # Force full load to avoid torch>=2.6 safe-unpickler failures on Ultralytics checkpoints.
++            kwargs["weights_only"] = False
++            return _orig_torch_load(*args, **kwargs)
++
++        _torch_load_compat._han_ultralytics_patched = True  # type: ignore[attr-defined]
++        torch.load = _torch_load_compat  # type: ignore[assignment]
 +    except Exception:
 +        # Best-effort: if the import path changes, Ultralytics may still work, or will
 +        # fail with a clearer error prompting manual allowlisting.
