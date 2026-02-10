@@ -37,6 +37,19 @@ Optional one-command smoke tests:
 /Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/smoke_e2e_with_gpu_real.sh
 ```
 
+## 0.5) Web UI: GVHMR Only (Fastest)
+
+This is the simplest “phone video -> 3D motion” UX loop.
+
+1. Ensure the Windows GPU worker is running (see below).
+1. Open `http://localhost:3000/gvhmr`
+1. Choose an `.mp4` (10-20s recommended).
+1. Leave defaults:
+1. Static camera: on
+1. Quick preview: on (trims to first 12s to keep demos responsive)
+1. Click `Run GVHMR`
+1. You will be redirected to `/jobs/<id>` where you can watch stage progress and see a side-by-side preview.
+
 Fastest “do it for me” launch:
 
 1. On Mac:
