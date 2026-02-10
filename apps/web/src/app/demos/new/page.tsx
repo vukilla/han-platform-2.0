@@ -1,19 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { annotateDemo, createDemo, createProject, getDemoUploadUrl, runXgen } from "@/lib/api";
 
 export default function NewDemoPage() {
+  const router = useRouter();
   const [projectName, setProjectName] = useState("Cargo Pickup Project");
   const [file, setFile] = useState<File | null>(null);
   const [robotModel, setRobotModel] = useState("unitree-g1");
   const [objectId, setObjectId] = useState("cargo_box");
-  const [poseEstimator, setPoseEstimator] = useState<"placeholder" | "gvhmr" | "none">("placeholder");
+  const [pipeline, setPipeline] = useState<"fast" | "real">("real");
   const [gvhmrStaticCam, setGvhmrStaticCam] = useState(true);
+  const [autoTrain, setAutoTrain] = useState(true);
+  const [gpuReady, setGpuReady] = useState<boolean | null>(null);
   const [tsStart, setTsStart] = useState("0.5");
   const [tsEnd, setTsEnd] = useState("8.0");
   const [anchorType, setAnchorType] = useState("palms_midpoint");
@@ -29,6 +33,14 @@ export default function NewDemoPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    fetch(`${apiUrl}/ops/workers?timeout=1.0`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setGpuReady(Boolean(data?.has_gpu_queue)))
+      .catch(() => setGpuReady(null));
+  }, []);
 
   async function uploadToPresignedUrl(uploadUrl: string, uploadFile: File) {
     const response = await fetch(uploadUrl, {
@@ -86,9 +98,9 @@ export default function NewDemoPage() {
         },
       };
 
-      if (poseEstimator === "placeholder") {
+      if (pipeline === "fast") {
         xgenParams.placeholder_pose = true;
-      } else if (poseEstimator === "gvhmr") {
+      } else {
         xgenParams.requires_gpu = true;
         xgenParams.pose_estimator = "gvhmr";
         xgenParams.gvhmr_static_cam = Boolean(gvhmrStaticCam);
@@ -97,15 +109,19 @@ export default function NewDemoPage() {
         xgenParams.frames = 40;
         xgenParams.nq = 12;
         xgenParams.contact_dim = 4;
-      } else {
-        xgenParams.pose_estimator = "none";
       }
 
       const job = await runXgen(demo.id, {
         ...xgenParams,
       });
       setJobId(job.id);
-      setStatus("XGen job started.");
+      setStatus("XGen job started. Redirecting...");
+      const qp = autoTrain
+        ? `?auto_train=1&train_mode=${pipeline === "real" ? "mocap" : "nep"}&train_backend=${
+            pipeline === "real" ? "isaaclab_teacher_ppo" : "synthetic"
+          }`
+        : "";
+      router.push(`/jobs/${job.id}${qp}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to run demo");
       setStatus(null);
@@ -261,38 +277,58 @@ export default function NewDemoPage() {
         </Card>
 
         <Card className="space-y-4">
-          <h2 className="text-xl font-semibold text-black">5. Pose extraction</h2>
-          <p className="text-sm">Choose how the platform estimates human motion. Default is fastest.</p>
-          <select
-            className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
-            value={poseEstimator}
-            onChange={(event) => setPoseEstimator(event.target.value as "placeholder" | "gvhmr" | "none")}
-          >
-            <option value="placeholder">Placeholder (fast, plumbing)</option>
-            <option value="gvhmr">GVHMR (real, runs on Windows GPU worker)</option>
-            <option value="none">Skip</option>
-          </select>
-          {poseEstimator === "gvhmr" ? (
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-black">5. Run end-to-end</h2>
+            <Badge
+              label={gpuReady === true ? "GPU worker connected" : gpuReady === false ? "GPU worker offline" : "GPU status unknown"}
+              tone={gpuReady === true ? "emerald" : gpuReady === false ? "rose" : "amber"}
+            />
+          </div>
+          <p className="text-sm">
+            Pick <strong>Real</strong> to run GVHMR pose extraction and Isaac Lab PPO on the Windows GPU worker, or{" "}
+            <strong>Fast</strong> to run a stubbed pipeline for quick UI validation.
+          </p>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="grid gap-2 text-sm font-semibold text-black">
+              Pipeline
+              <select
+                className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+                value={pipeline}
+                onChange={(event) => setPipeline(event.target.value as "fast" | "real")}
+              >
+                <option value="real">Real (GVHMR + Isaac Lab PPO, GPU)</option>
+                <option value="fast">Fast (placeholder + synthetic)</option>
+              </select>
+            </label>
+            <label className="grid gap-2 text-sm font-semibold text-black">
+              Auto-train after XGen
+              <select
+                className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+                value={autoTrain ? "yes" : "no"}
+                onChange={(event) => setAutoTrain(event.target.value === "yes")}
+              >
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </label>
+          </div>
+          {pipeline === "real" ? (
             <label className="flex items-center gap-2 text-sm text-black/70">
               <input
                 type="checkbox"
                 checked={gvhmrStaticCam}
                 onChange={(event) => setGvhmrStaticCam(event.target.checked)}
               />
-              Static camera (recommended for phone videos)
+              Static camera (GVHMR recommended for phone videos)
             </label>
           ) : null}
-          {poseEstimator === "gvhmr" ? (
+          {pipeline === "real" ? (
             <p className="text-xs text-black/60">
-              Requires Windows GPU worker and GVHMR checkpoints. If this fails, see <code>docs/GVHMR.md</code>.
+              GVHMR requires licensed SMPL-X model files on the GPU PC. If pose extraction falls back, open the XGen job
+              logs and follow <code>docs/GVHMR.md</code>.
             </p>
           ) : null}
-        </Card>
-
-        <Card className="space-y-4">
-          <h2 className="text-xl font-semibold text-black">6. Launch XGen job</h2>
-          <p className="text-sm">We will run pose extraction, retargeting, contact synthesis, and augmentation.</p>
-          <Button onClick={handleRun}>Start XGen</Button>
+          <Button onClick={handleRun}>Run end-to-end</Button>
           {status ? <p className="text-sm text-emerald-700">{status}</p> : null}
           {error ? <p className="text-sm text-rose-700">{error}</p> : null}
           {jobId ? (

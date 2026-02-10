@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
@@ -22,14 +22,21 @@ const stages = [
 
 export default function JobProgressPage() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const jobId = params?.id;
   const [job, setJob] = useState<XGenJobOut | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [trainMode, setTrainMode] = useState<"nep" | "mocap">("nep");
-  const [trainBackend, setTrainBackend] = useState<"synthetic" | "isaaclab_teacher_ppo">("synthetic");
+  const requestedTrainMode: "nep" | "mocap" = searchParams?.get("train_mode") === "mocap" ? "mocap" : "nep";
+  const requestedTrainBackend: "synthetic" | "isaaclab_teacher_ppo" =
+    searchParams?.get("train_backend") === "isaaclab_teacher_ppo" ? "isaaclab_teacher_ppo" : "synthetic";
+  const autoTrain = searchParams?.get("auto_train") === "1";
+
+  const [trainMode, setTrainMode] = useState<"nep" | "mocap">(requestedTrainMode);
+  const [trainBackend, setTrainBackend] = useState<"synthetic" | "isaaclab_teacher_ppo">(requestedTrainBackend);
   const [trainStatus, setTrainStatus] = useState<string | null>(null);
   const [trainError, setTrainError] = useState<string | null>(null);
   const [xmimicJobId, setXmimicJobId] = useState<string | null>(null);
+  const autoTrainTriggered = useRef(false);
 
   useEffect(() => {
     let timer: NodeJS.Timeout | null = null;
@@ -62,14 +69,14 @@ export default function JobProgressPage() {
   const jobIsFailed = status === "FAILED";
   const datasetId = typeof job?.params_json?.dataset_id === "string" ? job?.params_json?.dataset_id : null;
 
-  async function handleStartTraining() {
+  const startTraining = useCallback(async (mode: "nep" | "mocap", backend: "synthetic" | "isaaclab_teacher_ppo") => {
     if (!datasetId || !jobIsComplete) return;
     setTrainError(null);
     setXmimicJobId(null);
     setTrainStatus("Starting XMimic job...");
     try {
       const params: Record<string, unknown> = {};
-      if (trainBackend === "isaaclab_teacher_ppo") {
+      if (backend === "isaaclab_teacher_ppo") {
         params.backend = "isaaclab_teacher_ppo";
         params.env_task = "cargo_pickup_v0";
         params.isaaclab_task = "cargo_pickup_franka";
@@ -77,14 +84,43 @@ export default function JobProgressPage() {
         params.updates = 5;
         params.rollout_steps = 128;
       }
-      const xmimic = await runXmimic(datasetId, trainMode, params);
+      const xmimic = await runXmimic(datasetId, mode, params);
       setXmimicJobId(xmimic.id);
       setTrainStatus("XMimic job started.");
     } catch (err) {
       setTrainError(err instanceof Error ? err.message : "Failed to start training");
       setTrainStatus(null);
     }
+  }, [datasetId, jobIsComplete]);
+
+  async function handleStartTraining() {
+    await startTraining(trainMode, trainBackend);
   }
+
+  useEffect(() => {
+    if (!autoTrain) return;
+    if (!jobIsComplete || !datasetId) return;
+    if (xmimicJobId) return;
+    if (autoTrainTriggered.current) return;
+
+    autoTrainTriggered.current = true;
+    // Defer the state updates out of the effect body to avoid cascading render warnings.
+    setTimeout(() => {
+      void startTraining(requestedTrainMode, requestedTrainBackend);
+    }, 0);
+  }, [autoTrain, datasetId, jobIsComplete, requestedTrainBackend, requestedTrainMode, startTraining, xmimicJobId]);
+
+  const poseOk = job?.params_json && typeof job.params_json.pose_ok === "boolean" ? Boolean(job.params_json.pose_ok) : null;
+  const poseFallback =
+    job?.params_json && typeof job.params_json.pose_fallback === "string" ? (job.params_json.pose_fallback as string) : null;
+  const poseError =
+    job?.params_json && typeof job.params_json.pose_error === "string" ? (job.params_json.pose_error as string) : null;
+  const poseNpz =
+    job?.params_json && typeof job.params_json.pose_smplx_npz_uri === "string"
+      ? (job.params_json.pose_smplx_npz_uri as string)
+      : null;
+  const poseLog =
+    job?.params_json && typeof job.params_json.pose_log_uri === "string" ? (job.params_json.pose_log_uri as string) : null;
 
   const currentIndex = status ? stages.indexOf(status) : -1;
   const stageLabel = (index: number) => {
@@ -131,6 +167,33 @@ export default function JobProgressPage() {
         ))}
       </Card>
 
+      {poseOk !== null || poseFallback || poseError || poseNpz || poseLog ? (
+        <Card className="space-y-3">
+          <h2 className="text-xl font-semibold text-black">Pose extraction</h2>
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <Badge
+              label={poseOk === true ? "GVHMR OK" : poseOk === false ? "GVHMR fallback" : "Unknown"}
+              tone={poseOk === true ? "emerald" : poseOk === false ? "rose" : "amber"}
+            />
+            {poseFallback ? <span className="text-black/70">fallback: {poseFallback}</span> : null}
+          </div>
+          {poseError ? <p className="text-sm text-rose-700">{poseError}</p> : null}
+          <div className="flex flex-wrap items-center gap-4">
+            {poseNpz ? (
+              <a className="text-sm font-semibold text-black underline" href={poseNpz} target="_blank" rel="noreferrer">
+                Download pose artifact
+              </a>
+            ) : null}
+            {poseLog ? (
+              <a className="text-sm font-semibold text-black underline" href={poseLog} target="_blank" rel="noreferrer">
+                Download pose log
+              </a>
+            ) : null}
+            <span className="text-sm text-black/60">GVHMR setup: see `docs/GVHMR.md` in the repo</span>
+          </div>
+        </Card>
+      ) : null}
+
       {datasetId && jobIsComplete ? (
         <Card className="space-y-4">
           <h2 className="text-xl font-semibold text-black">Next: Train a policy</h2>
@@ -159,7 +222,7 @@ export default function JobProgressPage() {
             </label>
           </div>
           <div className="flex flex-wrap items-center gap-4">
-            <Button onClick={handleStartTraining}>Start training</Button>
+            <Button onClick={handleStartTraining}>{autoTrain ? "Training will auto-start" : "Start training"}</Button>
             <Link href={`/training?dataset_id=${datasetId}`} className="text-sm font-semibold text-black underline">
               Advanced training page
             </Link>

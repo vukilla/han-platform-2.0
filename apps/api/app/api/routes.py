@@ -40,6 +40,22 @@ def _presign_maybe(uri: str | None) -> str | None:
     return create_presigned_get(key)
 
 
+def _presign_params_json(params_json: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Best-effort presigning for known object-storage artifacts embedded in params_json.
+
+    Some jobs write intermediate artifacts (e.g. GVHMR pose outputs) into `params_json` as raw
+    storage keys. Presign a small allowlist so the Web UI can provide download links.
+    """
+    if not params_json:
+        return params_json
+    params = dict(params_json)
+    for key in ("pose_smplx_npz_uri", "pose_meta_uri", "pose_log_uri"):
+        val = params.get(key)
+        if isinstance(val, str) and val:
+            params[key] = _presign_maybe(val)
+    return params
+
+
 class AuthLoginRequest(BaseModel):
     email: str
     name: str | None = None
@@ -207,6 +223,7 @@ def list_xgen_jobs(demo_id: UUID | None = None, db: Session = Depends(get_db)):
     for job in jobs:
         job_out = schemas.XGenJobOut.model_validate(job)
         job_out.logs_uri = _presign_maybe(job_out.logs_uri)
+        job_out.params_json = _presign_params_json(job_out.params_json)
         out.append(job_out)
     return out
 
@@ -218,6 +235,7 @@ def get_xgen_job(job_id: UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Job not found")
     out = schemas.XGenJobOut.model_validate(job)
     out.logs_uri = _presign_maybe(out.logs_uri)
+    out.params_json = _presign_params_json(out.params_json)
     return out
 
 

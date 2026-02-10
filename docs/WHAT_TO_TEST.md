@@ -61,6 +61,19 @@ Fastest REAL “do it for me” launch (GVHMR + Isaac Lab PPO):
 2. When it prints your Mac IP, run the printed Windows command on the GPU PC.
    - If GVHMR fails, follow `docs/GVHMR.md` to manually place the remaining checkpoints.
 
+### Even easier: Mac triggers the Windows worker via SSH
+
+If you have SSH access from your Mac to the Windows GPU PC (recommended), you can do it in one command:
+
+```bash
+WINDOWS_GPU_IP=<windows_ip> /Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/mac/run_full_e2e_real_ssh.sh
+```
+
+This will:
+- start the Mac control-plane (docker compose)
+- start/restart the Windows GPU worker over SSH
+- run the REAL smoke (GVHMR pose + Isaac Lab PPO checkpoint)
+
 ## 1) Web UI: Upload -> XGen -> Dataset
 
 1. Open `http://localhost:3000/auth`

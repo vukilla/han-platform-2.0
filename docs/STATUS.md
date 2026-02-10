@@ -1,6 +1,6 @@
 # Han Platform 2.0 Status
 
-## Current state (2026-02-09)
+## Current state (2026-02-10)
 - Laptop local stack is running: `docker compose up` (Postgres/Redis/MinIO/API/worker/web)
 - API health check passes: `GET http://localhost:8000/health`
 - Web dev server loads (fixed linux native deps by isolating container `node_modules` volume)
@@ -16,10 +16,15 @@
   - `/policies` index page
   - `/xmimic/<job_id>` progress page
   - XGen job page now exposes demo id, dataset id, and presigned logs download
+  - XGen job API presigns GVHMR pose artifacts in `params_json` (pose NPZ + meta + log) so the UI can link them
 - Quality approval now mints MVP points (reward events) for approved demos/datasets
 - Paper-fidelity work continues on laptop: Table IV obs/reward schema parity and CPU-side contact refinement improvements
   - Relative motion reward parity tightened (Eq. 10 uses mean squared L2 norm).
   - Contact refinement upgraded: optional CPU robot IK refinement for contact frames (pre-physics).
+  - Simplified web wizard: single "Run end-to-end" preset (Fast vs Real) and optional auto-train from the job page.
+  - Added Mac scripts to start the Windows GPU worker via SSH and run the REAL E2E in one command:
+    - `scripts/mac/start_windows_gpu_worker_ssh.sh`
+    - `scripts/mac/run_full_e2e_real_ssh.sh`
 
 ## Current state (2026-02-04)
 - Monorepo scaffolded with apps/web, apps/api, services/xgen, services/xmimic, infra/docker-compose.yml
@@ -131,7 +136,7 @@
 - Added retargeting validator for EEF errors, joint limits, and foot skating (18.04).
 - Added observation pipeline with normalization + history buffers (19.06).
 - Added Table IV mapping doc and enforced observation schemas (teacher vs student, NEP vs MoCap) with tests (23.01).
-- Corrected Table IV student observation schema: removed `pd_error` from student (teacher-only) and updated docs/tests (23.05).
+- Corrected Table IV student observation schema: student includes `pd_error` (matches Table IV) and updated docs/tests (23.05).
 - Tightened relative-motion reward error metric to match Eq. 10 (mean squared L2 norm) + expanded reg/relative tests (23.02).
 - Made `xmimic` top-level imports lazy so schema/tests work without torch installed (23.03).
 - Added optional CPU robot IK refinement into XGen contact refinement pipeline (23.04).
