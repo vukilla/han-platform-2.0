@@ -107,6 +107,10 @@ export default function GVHMRPage() {
       setError("Pose worker is offline. Start the Windows worker first, then try again.");
       return;
     }
+    if (smplxStatus?.exists === false) {
+      setError("Upload the licensed SMPL-X file `SMPLX_NEUTRAL.npz` first (one-time setup), then rerun.");
+      return;
+    }
     try {
       await ensureLoggedIn();
 
@@ -128,9 +132,9 @@ export default function GVHMRPage() {
         pose_estimator: "gvhmr",
         gvhmr_static_cam: Boolean(gvhmrStaticCam),
         gvhmr_max_seconds: quickTrim ? 12 : undefined,
-        // Keep fallback enabled so the platform can still complete even if licensed SMPL-X assets are missing.
-        // Once GVHMR is fully configured, set `fail_on_pose_error=true` to hard-fail instead.
-        fail_on_pose_error: false,
+        // On the GVHMR-only page, require the licensed SMPL-X model file and fail fast if it's missing.
+        // The job page provides an inline uploader + requeue to recover from this.
+        fail_on_pose_error: true,
       });
 
       setStatus("Redirecting...");
@@ -229,7 +233,7 @@ export default function GVHMRPage() {
             </label>
           </div>
         </details>
-        <Button onClick={handleRun} disabled={!file}>
+        <Button onClick={handleRun} disabled={!file || poseReady === false || smplxStatus?.exists === false}>
           Run GVHMR
         </Button>
         {status ? <p className="text-sm text-emerald-700">{status}</p> : null}
