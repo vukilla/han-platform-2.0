@@ -154,6 +154,193 @@ def _load_smpl_params(results_path: Path) -> dict[str, Any]:
     return {"smpl_params_global": smpl_np}
 
 
+def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Path) -> dict[str, Any]:
+    """Create a lightweight side-by-side preview video without PyTorch3D renderer.
+
+    Left: original video
+    Right: a simple 3D-looking skeleton render from the recovered SMPL-X motion.
+
+    This is intentionally a fallback preview: GVHMR's official mesh renderer depends on
+    PyTorch3D renderer components that are painful to install on Windows. The skeleton
+    preview gives users immediate visual feedback in the Web UI.
+    """
+    import math
+
+    import cv2
+    import numpy as np
+    import torch
+
+    # Ensure GVHMR python packages (hmr4d/...) and the pytorch3d stub are importable.
+    gvhmr_root = _resolve_gvhmr_root()
+    if str(gvhmr_root) not in sys.path:
+        sys.path.insert(0, str(gvhmr_root))
+
+    from hmr4d.utils.body_model.smplx_lite import SmplxLiteCoco17
+
+    def _as_tensor(x) -> torch.Tensor:
+        if torch.is_tensor(x):
+            return x
+        return torch.from_numpy(np.asarray(x))
+
+    pred = torch.load(results_path, map_location="cpu")
+    smpl_params = pred.get("smpl_params_global") or {}
+    if not smpl_params:
+        raise ValueError("hmr4d_results.pt missing smpl_params_global")
+
+    body_pose = _as_tensor(smpl_params.get("body_pose")).float()
+    global_orient = _as_tensor(smpl_params.get("global_orient")).float()
+    transl = smpl_params.get("transl", None)
+    transl = _as_tensor(transl).float() if transl is not None else torch.zeros((body_pose.shape[0], 3), dtype=torch.float32)
+    betas = _as_tensor(smpl_params.get("betas")).float()
+
+    # Add batch dim expected by SmplxLite.
+    if body_pose.ndim == 2:
+        body_pose = body_pose[None, ...]
+    if global_orient.ndim == 2:
+        global_orient = global_orient[None, ...]
+    if transl.ndim == 2:
+        transl = transl[None, ...]
+    if betas.ndim == 1:
+        betas = betas[None, ...]
+
+    total_frames = int(body_pose.shape[1])
+    if total_frames <= 0:
+        raise ValueError("smpl_params_global has no frames")
+
+    # Cap preview cost by decimating long videos.
+    max_preview_frames = 450
+    stride = max(1, int(math.ceil(total_frames / max_preview_frames)))
+    frame_ids = np.arange(0, total_frames, stride, dtype=np.int32)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = SmplxLiteCoco17().to(device)
+    with torch.no_grad():
+        joints = model(
+            body_pose[:, frame_ids].to(device),
+            betas.to(device),
+            global_orient[:, frame_ids].to(device),
+            transl[:, frame_ids].to(device),
+        )
+    joints_np = joints.squeeze(0).detach().cpu().numpy()  # (F', 17, 3)
+
+    # Center around pelvis (midpoint of left/right hip in COCO17 indices).
+    pelvis = 0.5 * (joints_np[:, 11, :] + joints_np[:, 12, :])  # (F', 3)
+    joints_np = joints_np - pelvis[:, None, :]
+
+    # Rotate about Y axis so Z contributes to apparent X (gives a 3D feel in orthographic projection).
+    theta = math.radians(35.0)
+    c, s = math.cos(theta), math.sin(theta)
+    R = np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]], dtype=np.float32)
+    joints_np = joints_np @ R.T
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise FileNotFoundError(f"Unable to open video with OpenCV: {video_path}")
+
+    fps_in = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+    fps_out = max(1.0, fps_in / float(stride))
+    w_in = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    h_in = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    if w_in <= 0 or h_in <= 0:
+        w_in, h_in = 640, 360
+
+    target_h = 360
+    scale = float(target_h) / float(h_in)
+    target_w = max(1, int(round(w_in * scale)))
+
+    skel_w = target_w
+    skel_h = target_h
+
+    x = joints_np[:, :, 0]
+    y = joints_np[:, :, 1]
+    xmin, xmax = float(np.min(x)), float(np.max(x))
+    ymin, ymax = float(np.min(y)), float(np.max(y))
+    x_center = 0.5 * (xmin + xmax)
+    y_center = 0.5 * (ymin + ymax)
+    span_x = max(1e-6, xmax - xmin)
+    span_y = max(1e-6, ymax - ymin)
+    skel_scale = 0.9 * min(float(skel_w) / span_x, float(skel_h) / span_y)
+
+    coco_edges = [
+        (15, 13),
+        (13, 11),
+        (16, 14),
+        (14, 12),
+        (11, 12),
+        (5, 11),
+        (6, 12),
+        (5, 6),
+        (5, 7),
+        (6, 8),
+        (7, 9),
+        (8, 10),
+        (1, 2),
+        (0, 1),
+        (0, 2),
+        (1, 3),
+        (2, 4),
+        (3, 5),
+        (4, 6),
+    ]
+
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    out_mp4_path.parent.mkdir(parents=True, exist_ok=True)
+    writer = cv2.VideoWriter(str(out_mp4_path), fourcc, fps_out, (target_w + skel_w, target_h))
+    if not writer.isOpened():
+        raise RuntimeError(f"Unable to create VideoWriter for: {out_mp4_path}")
+
+    try:
+        frame_idx = 0
+        for jidx in range(joints_np.shape[0]):
+            ok, frame = cap.read()
+            if not ok:
+                break
+            # We asked OpenCV for all frames; only keep ones matching our stride.
+            if frame_idx % stride != 0:
+                frame_idx += 1
+                continue
+            frame_idx += 1
+
+            frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+
+            skel = np.zeros((skel_h, skel_w, 3), dtype=np.uint8)
+            skel[:] = (14, 12, 10)
+            pts = joints_np[jidx]
+            u = ((pts[:, 0] - x_center) * skel_scale + skel_w * 0.5).astype(np.int32)
+            v = ((-(pts[:, 1] - y_center)) * skel_scale + skel_h * 0.55).astype(np.int32)
+
+            for a, b in coco_edges:
+                cv2.line(skel, (int(u[a]), int(v[a])), (int(u[b]), int(v[b])), (70, 255, 120), 3)
+            for k in range(pts.shape[0]):
+                cv2.circle(skel, (int(u[k]), int(v[k])), 4, (70, 255, 120), -1)
+
+            cv2.putText(
+                skel,
+                "GVHMR 3D skeleton (preview)",
+                (12, 28),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (235, 235, 235),
+                2,
+                cv2.LINE_AA,
+            )
+
+            combined = np.concatenate([frame, skel], axis=1)
+            writer.write(combined)
+    finally:
+        cap.release()
+        writer.release()
+
+    return {
+        "ok": True,
+        "preview_mp4": str(out_mp4_path),
+        "fps_in": fps_in,
+        "fps_out": fps_out,
+        "stride": int(stride),
+        "frames_out": int(joints_np.shape[0]),
+    }
+
+
 def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo: bool, f_mm: int | None) -> dict[str, Any]:
     gvhmr_root = _resolve_gvhmr_root()
     if not gvhmr_root.exists():
@@ -225,12 +412,23 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
     npz_path = output_dir / f"{video_path.stem}_gvhmr_smplx.npz"
     np.savez_compressed(npz_path, **payload["smpl_params_global"])
 
+    preview_path = output_dir / f"{video_path.stem}_gvhmr_preview.mp4"
+    preview = None
+    preview_error = None
+    try:
+        preview = _render_gvhmr_preview(video_path, results_path, preview_path)
+    except Exception as exc:  # noqa: BLE001
+        preview = None
+        preview_error = f"{type(exc).__name__}: {exc}"
+
     meta = {
         "ok": True,
         "video": str(video_path),
         "results_path": str(results_path),
         "output_npz": str(npz_path),
         "gvhmr_log": str(gvhmr_log),
+        "preview_mp4": str(preview_path) if preview_path.exists() else None,
+        "preview_error": preview_error,
         "python_cmd": cmd[:3] if cmd[:2] == ["cmd.exe", "/c"] else cmd[:1],
         "static_cam": bool(static_cam),
         "use_dpvo": bool(use_dpvo),
@@ -244,6 +442,8 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         "meta_path": str(meta_path),
         "results_path": str(results_path),
         "gvhmr_log_path": str(gvhmr_log),
+        "preview_mp4_path": str(preview_path) if preview_path.exists() else None,
+        "preview_error": preview_error,
     }
 
 

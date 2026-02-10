@@ -6,13 +6,13 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { getXgenJob, runXmimic, XGenJobOut } from "@/lib/api";
+import { getDemo, getXgenJob, runXmimic, DemoOut, XGenJobOut } from "@/lib/api";
 
 const DEFAULT_ISAACLAB_NUM_ENVS = 8;
 const DEFAULT_ISAACLAB_UPDATES = 2;
 const DEFAULT_ISAACLAB_ROLLOUT_STEPS = 64;
 
-const stages = [
+const fullStages = [
   "INGEST_VIDEO",
   "ESTIMATE_POSE",
   "RETARGET",
@@ -29,7 +29,9 @@ export default function JobProgressPage() {
   const searchParams = useSearchParams();
   const jobId = params?.id;
   const [job, setJob] = useState<XGenJobOut | null>(null);
+  const [demo, setDemo] = useState<DemoOut | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [gpuReady, setGpuReady] = useState<boolean | null>(null);
   const requestedTrainMode: "nep" | "mocap" = searchParams?.get("train_mode") === "mocap" ? "mocap" : "nep";
   const requestedTrainBackend: "synthetic" | "isaaclab_teacher_ppo" =
     searchParams?.get("train_backend") === "isaaclab_teacher_ppo" ? "isaaclab_teacher_ppo" : "synthetic";
@@ -68,10 +70,43 @@ export default function JobProgressPage() {
     };
   }, [jobId]);
 
+  useEffect(() => {
+    if (!job?.demo_id) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const fetched = await getDemo(job.demo_id);
+        if (!cancelled) setDemo(fetched);
+      } catch {
+        if (!cancelled) setDemo(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [job?.demo_id]);
+
   const status = job?.status ?? null;
   const jobIsComplete = status === "COMPLETED";
   const jobIsFailed = status === "FAILED";
   const datasetId = typeof job?.params_json?.dataset_id === "string" ? job?.params_json?.dataset_id : null;
+  const onlyPose = Boolean(job?.params_json?.only_pose);
+  const stages = onlyPose ? (["INGEST_VIDEO", "ESTIMATE_POSE", "RENDER_PREVIEWS"] as const) : fullStages;
+  const stageNames: Record<string, string> = onlyPose
+    ? {
+        INGEST_VIDEO: "Upload video",
+        ESTIMATE_POSE: "Run GVHMR",
+        RENDER_PREVIEWS: "Render preview",
+      }
+    : {};
+
+  useEffect(() => {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    fetch(`${apiUrl}/ops/workers?timeout=1.0`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setGpuReady(Boolean(data?.has_gpu_queue)))
+      .catch(() => setGpuReady(null));
+  }, []);
 
   const startTraining = useCallback(async (mode: "nep" | "mocap", backend: "synthetic" | "isaaclab_teacher_ppo") => {
     if (!datasetId || !jobIsComplete) return;
@@ -126,6 +161,11 @@ export default function JobProgressPage() {
       : null;
   const poseLog =
     job?.params_json && typeof job.params_json.pose_log_uri === "string" ? (job.params_json.pose_log_uri as string) : null;
+  const posePreview =
+    job?.params_json && typeof job.params_json.pose_preview_mp4_uri === "string"
+      ? (job.params_json.pose_preview_mp4_uri as string)
+      : null;
+  const demoVideo = demo?.video_uri ?? null;
 
   const currentIndex = status ? stages.indexOf(status) : -1;
   const stageLabel = (index: number) => {
@@ -137,17 +177,19 @@ export default function JobProgressPage() {
     return "Queued";
   };
 
+  const waitingForWorker = !jobIsComplete && !jobIsFailed && currentIndex === -1;
+
   return (
     <div className="space-y-8">
       <section className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <p className="section-eyebrow">Job progress</p>
-          <h1 className="text-3xl font-semibold text-black">XGen pipeline stages</h1>
+          <h1 className="text-3xl font-semibold text-black">{onlyPose ? "GVHMR pose pipeline" : "XGen pipeline stages"}</h1>
           {jobId ? <p className="mt-2 text-sm text-black/60">{jobId}</p> : null}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <Badge label={status || "Queued"} tone={jobIsComplete ? "emerald" : jobIsFailed ? "rose" : "amber"} />
-          {datasetId ? (
+          {datasetId && !onlyPose ? (
             <Link href={`/datasets/${datasetId}`} className="text-sm font-semibold text-black underline">
               Open dataset
             </Link>
@@ -160,17 +202,60 @@ export default function JobProgressPage() {
         </div>
       </section>
 
+      {onlyPose && waitingForWorker && gpuReady === false ? (
+        <Card className="space-y-2">
+          <h2 className="text-lg font-semibold text-black">Waiting for Windows GPU worker</h2>
+          <p className="text-sm text-black/70">
+            This job requires the GPU worker. Start it on your Windows PC, then this page will update automatically.
+          </p>
+          <p className="text-sm font-mono text-black/70">
+            scripts\\windows\\one_click_gpu_worker.ps1 -MacIp &lt;MAC_LAN_IP&gt; -IsaacSimPath C:\\isaacsim
+          </p>
+        </Card>
+      ) : null}
+
       <Card className="space-y-6">
         {stages.map((stage, index) => (
           <div key={stage} className="flex items-center justify-between border-b border-black/10 pb-4 last:border-none last:pb-0">
             <div>
               <p className="text-sm font-semibold text-black/60">Stage {index + 1}</p>
-              <p className="text-lg font-semibold text-black">{stage}</p>
+              <p className="text-lg font-semibold text-black">{stageNames[stage] ?? stage}</p>
             </div>
             <span className="text-sm text-black/70">{stageLabel(index)}</span>
           </div>
         ))}
       </Card>
+
+      {demoVideo || posePreview ? (
+        <Card className="space-y-4">
+          <h2 className="text-xl font-semibold text-black">Video preview</h2>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-black/60">Original</p>
+              {demoVideo ? (
+                <video className="w-full rounded-2xl border border-black/10 bg-black" controls playsInline src={demoVideo} />
+              ) : (
+                <p className="text-sm text-black/60">Waiting for upload...</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-black/60">GVHMR preview</p>
+              {posePreview ? (
+                <video
+                  className="w-full rounded-2xl border border-black/10 bg-black"
+                  controls
+                  playsInline
+                  src={posePreview}
+                />
+              ) : (
+                <p className="text-sm text-black/60">
+                  {status === "ESTIMATE_POSE" ? "GVHMR running..." : "Waiting for pose preview..."}
+                </p>
+              )}
+            </div>
+          </div>
+        </Card>
+      ) : null}
 
       {poseOk !== null || poseFallback || poseError || poseNpz || poseLog ? (
         <Card className="space-y-3">
@@ -199,7 +284,7 @@ export default function JobProgressPage() {
         </Card>
       ) : null}
 
-      {datasetId && jobIsComplete ? (
+      {datasetId && jobIsComplete && !onlyPose ? (
         <Card className="space-y-4">
           <h2 className="text-xl font-semibold text-black">Next: Train a policy</h2>
           <div className="grid gap-3 md:grid-cols-2">

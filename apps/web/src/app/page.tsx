@@ -32,7 +32,7 @@ export default function Home() {
             policies with XMimic. Publish datasets, checkpoints, and contributor attribution in a single workflow.
           </p>
           <div className="flex flex-wrap gap-4">
-            <LinkButton href="/demos/new">Start a demo</LinkButton>
+            <LinkButton href="/gvhmr">Run GVHMR</LinkButton>
             <LinkButton href="/dashboard" variant="outline">
               View dashboard
             </LinkButton>

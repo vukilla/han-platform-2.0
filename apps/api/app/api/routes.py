@@ -3,6 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+import json
 import redis
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -49,7 +50,7 @@ def _presign_params_json(params_json: dict[str, Any] | None) -> dict[str, Any] |
     if not params_json:
         return params_json
     params = dict(params_json)
-    for key in ("pose_smplx_npz_uri", "pose_meta_uri", "pose_log_uri"):
+    for key in ("pose_smplx_npz_uri", "pose_meta_uri", "pose_log_uri", "pose_preview_mp4_uri"):
         val = params.get(key)
         if isinstance(val, str) and val:
             params[key] = _presign_maybe(val)
@@ -136,7 +137,13 @@ def create_demo(
 
 @router.get("/demos", response_model=list[schemas.DemoOut])
 def list_demos(project_id: UUID | None = None, db: Session = Depends(get_db)):
-    return crud.list_demos(db, project_id=project_id)
+    demos = crud.list_demos(db, project_id=project_id)
+    out: list[schemas.DemoOut] = []
+    for demo in demos:
+        demo_out = schemas.DemoOut.model_validate(demo)
+        demo_out.video_uri = _presign_maybe(demo_out.video_uri)
+        out.append(demo_out)
+    return out
 
 
 class UploadUrlResponse(BaseModel):
@@ -172,7 +179,9 @@ def get_demo(demo_id: UUID, db: Session = Depends(get_db)):
     demo = crud.get_demo(db, demo_id)
     if not demo:
         raise HTTPException(status_code=404, detail="Demo not found")
-    return demo
+    out = schemas.DemoOut.model_validate(demo)
+    out.video_uri = _presign_maybe(out.video_uri)
+    return out
 
 
 @router.patch("/demos/{demo_id}", response_model=schemas.DemoOut)
@@ -503,14 +512,46 @@ def list_workers(timeout: float = 2.0, include_stats: bool = False) -> dict[str,
             "ping": {},
             "active_queues": {},
             "stats": {},
+            "heartbeat_workers": [],
         }
 
-    worker_names = sorted(set(ping.keys()) | set(queues.keys()) | set(stats.keys()))
+    # Fall back to a simple Redis heartbeat published by workers. This is more robust than
+    # Celery remote-control in mixed Docker/Windows setups.
+    heartbeat_workers: list[dict[str, Any]] = []
+    heartbeat_has_gpu = False
+    try:
+        client = redis.Redis.from_url(settings.redis_url)
+        for key in client.scan_iter(match="han:worker_heartbeat:*", count=100):
+            key_str = key.decode("utf-8") if isinstance(key, (bytes, bytearray)) else str(key)
+            raw = client.get(key)
+            payload = {}
+            if raw:
+                try:
+                    payload = json.loads(raw)
+                except Exception:
+                    payload = {}
+            parts = key_str.split(":")
+            role = payload.get("role") or (parts[2] if len(parts) > 2 else None)
+            worker_name = payload.get("worker_name") or (parts[3] if len(parts) > 3 else None) or key_str
+            heartbeat_workers.append({"worker_name": worker_name, "role": role})
+            if role == settings.celery_gpu_queue:
+                heartbeat_has_gpu = True
+    except Exception:
+        heartbeat_workers = []
+        heartbeat_has_gpu = False
+
+    worker_names = sorted(
+        set(ping.keys())
+        | set(queues.keys())
+        | set(stats.keys())
+        | {w.get("worker_name") for w in heartbeat_workers if w.get("worker_name")}
+    )
     has_gpu_queue = any(
         (q or {}).get("name") == settings.celery_gpu_queue
         for qlist in (queues or {}).values()
         for q in (qlist or [])
     )
+    has_gpu_queue = bool(has_gpu_queue or heartbeat_has_gpu)
 
     return {
         "ok": True,
@@ -520,4 +561,5 @@ def list_workers(timeout: float = 2.0, include_stats: bool = False) -> dict[str,
         "ping": ping,
         "active_queues": queues,
         "stats": stats,
+        "heartbeat_workers": heartbeat_workers,
     }

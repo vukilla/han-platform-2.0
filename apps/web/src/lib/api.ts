@@ -53,6 +53,22 @@ export async function createDemo(projectId: string, robotModel?: string, objectI
   });
 }
 
+export type DemoOut = {
+  id: string;
+  project_id: string;
+  uploader_id?: string | null;
+  video_uri?: string | null;
+  fps?: number | null;
+  duration?: number | null;
+  robot_model?: string | null;
+  object_id?: string | null;
+  status: string;
+};
+
+export async function getDemo(demoId: string) {
+  return apiFetch<DemoOut>(`/demos/${demoId}`);
+}
+
 export async function getDemoUploadUrl(demoId: string) {
   return apiFetch<{ upload_url: string; video_uri: string }>(`/demos/${demoId}/upload-url`, {
     method: "POST",

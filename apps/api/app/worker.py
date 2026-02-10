@@ -2,9 +2,12 @@ import io
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import zipfile
 from datetime import datetime
 from time import sleep
@@ -12,7 +15,9 @@ from uuid import UUID
 
 import numpy as np
 from celery import Celery
+from celery.signals import worker_ready, worker_shutdown
 from kombu import Exchange, Queue
+import redis
 
 from app.core.config import get_settings
 from app.core.alerts import send_alert
@@ -46,6 +51,67 @@ celery_app.conf.update(
     task_acks_late=settings.celery_task_acks_late,
     task_reject_on_worker_lost=settings.celery_reject_on_worker_lost,
 )
+
+# Celery remote-control (inspect/ping) can be flaky across Docker<->Windows setups
+# (e.g., clock drift, NAT quirks). We publish a lightweight heartbeat key in Redis
+# so the API can reliably detect a running GPU worker even if `inspect.ping()` fails.
+_heartbeat_stop = threading.Event()
+_heartbeat_thread: threading.Thread | None = None
+
+
+def _detect_worker_role() -> str:
+    role = (os.environ.get("HAN_WORKER_ROLE") or "").strip().lower()
+    if role:
+        return role
+    argv = " ".join(sys.argv).lower()
+    if " -q " in f" {argv} " or " --queues " in f" {argv} ":
+        if "gpu" in argv:
+            return "gpu"
+    return "cpu"
+
+
+def _heartbeat_key(worker_name: str, role: str) -> str:
+    # role is usually "cpu" or "gpu"
+    return f"han:worker_heartbeat:{role}:{worker_name}"
+
+
+def _start_heartbeat() -> None:
+    global _heartbeat_thread  # noqa: PLW0603
+    if _heartbeat_thread and _heartbeat_thread.is_alive():
+        return
+
+    role = _detect_worker_role()
+    worker_name = f"celery@{socket.gethostname()}"
+    key = _heartbeat_key(worker_name, role)
+
+    def _run() -> None:
+        client = redis.Redis.from_url(settings.redis_url)
+        payload = json.dumps({"worker_name": worker_name, "role": role})
+        while not _heartbeat_stop.is_set():
+            try:
+                # Keep a short TTL so stale workers disappear quickly.
+                client.setex(key, 30, payload)
+            except Exception:
+                pass
+            time.sleep(5)
+
+    _heartbeat_stop.clear()
+    _heartbeat_thread = threading.Thread(target=_run, name=f"han-heartbeat-{worker_name}", daemon=True)
+    _heartbeat_thread.start()
+
+
+def _stop_heartbeat() -> None:
+    _heartbeat_stop.set()
+
+
+@worker_ready.connect
+def _on_worker_ready(**kwargs) -> None:  # noqa: ARG001
+    _start_heartbeat()
+
+
+@worker_shutdown.connect
+def _on_worker_shutdown(**kwargs) -> None:  # noqa: ARG001
+    _stop_heartbeat()
 
 
 XGEN_STAGES = [
@@ -336,10 +402,12 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
     npz_path = Path(payload.get("npz_path", "")) if payload.get("npz_path") else None
     meta_path = Path(payload.get("meta_path", "")) if payload.get("meta_path") else None
     gvhmr_log_path = Path(payload.get("gvhmr_log_path", "")) if payload.get("gvhmr_log_path") else None
+    preview_path = Path(payload.get("preview_mp4_path", "")) if payload.get("preview_mp4_path") else None
 
     pose_npz_key = f"demos/{demo_id}/poses/{job_id}/gvhmr_smplx.npz"
     pose_meta_key = f"demos/{demo_id}/poses/{job_id}/gvhmr_meta.json"
     pose_log_key = f"demos/{demo_id}/poses/{job_id}/gvhmr.log"
+    pose_preview_key = f"demos/{demo_id}/poses/{job_id}/gvhmr_preview.mp4"
 
     # Always attempt to upload meta + log for debugging.
     pose_log_uri = None
@@ -370,9 +438,12 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
 
     pose_fallback = None
     pose_error = None
+    pose_preview_uri = None
     if ok and npz_path and meta_path and npz_path.exists() and meta_path.exists():
         upload_file(pose_npz_key, npz_path, content_type="application/octet-stream")
         upload_file(pose_meta_key, meta_path, content_type="application/json")
+        if preview_path and preview_path.exists():
+            pose_preview_uri = upload_file(pose_preview_key, preview_path, content_type="video/mp4")
     else:
         # If real GVHMR pose extraction fails (most commonly due to missing licensed SMPL-X model files),
         # fall back to a placeholder pose so the platform can still complete the end-to-end "golden path".
@@ -416,11 +487,67 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
         upload_file(pose_npz_key, placeholder_npz, content_type="application/octet-stream")
         upload_file(pose_meta_key, placeholder_meta, content_type="application/json")
 
+        # Best-effort placeholder preview: original video on the left, error banner on the right.
+        try:
+            import cv2
+            import numpy as np
+
+            cap = cv2.VideoCapture(str(local_video))
+            fps_in = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+            w_in = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 640)
+            h_in = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 360)
+
+            target_h = 360
+            scale = float(target_h) / float(max(1, h_in))
+            target_w = max(1, int(round(w_in * scale)))
+
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            preview_out = out_dir / "gvhmr_preview.mp4"
+            writer = cv2.VideoWriter(str(preview_out), fourcc, fps_in, (target_w * 2, target_h))
+            if writer.isOpened():
+                frame_count = 0
+                while frame_count < 240:  # cap preview to ~8s @30fps
+                    ok_frame, frame = cap.read()
+                    if not ok_frame:
+                        break
+                    frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+                    right = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+                    right[:] = (14, 12, 10)
+                    cv2.putText(
+                        right,
+                        "GVHMR failed",
+                        (16, 64),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1.2,
+                        (80, 120, 255),
+                        3,
+                        cv2.LINE_AA,
+                    )
+                    cv2.putText(
+                        right,
+                        "See logs for details",
+                        (16, 110),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.8,
+                        (235, 235, 235),
+                        2,
+                        cv2.LINE_AA,
+                    )
+                    combined = np.concatenate([frame, right], axis=1)
+                    writer.write(combined)
+                    frame_count += 1
+                writer.release()
+                pose_preview_uri = upload_file(pose_preview_key, preview_out, content_type="video/mp4")
+            cap.release()
+        except Exception:
+            pose_preview_uri = None
+
     return {
         "pose_estimator": "gvhmr",
         "pose_smplx_npz_uri": pose_npz_key,
         "pose_meta_uri": pose_meta_key,
         "pose_log_uri": pose_log_uri,
+        "pose_preview_mp4_uri": pose_preview_uri,
         "pose_ok": bool(ok),
         "pose_fallback": pose_fallback,
         "pose_error": pose_error,
@@ -438,7 +565,9 @@ def run_xgen_job(self, job_id: str):
             return
         dataset = _ensure_dataset_for_xgen_job(db, job)
         params = dict(job.params_json or {})
-        for stage in XGEN_STAGES:
+        only_pose = bool(params.get("only_pose", False))
+        stages = ["INGEST_VIDEO", "ESTIMATE_POSE", "RENDER_PREVIEWS"] if only_pose else XGEN_STAGES
+        for stage in stages:
             _update_job_status(db, job, stage)
             log_lines.append(f"{datetime.utcnow().isoformat()}Z stage={stage}")
             sleep(0.5)
@@ -476,7 +605,17 @@ def run_xgen_job(self, job_id: str):
                 job.params_json = params
                 db.add(job)
                 db.commit()
+                # Persist logs incrementally so the Web UI can show progress while GVHMR is running.
+                try:
+                    logs_uri = _write_job_log("xgen", job_id, log_lines)
+                    job.logs_uri = logs_uri
+                    db.add(job)
+                    db.commit()
+                except Exception:
+                    pass
             if stage == "EXPORT_DATASET":
+                if only_pose:
+                    continue
                 existing = crud.list_dataset_clips(db, dataset.id)
                 if not existing:
                     frames = int(params.get("frames", 60))
@@ -539,6 +678,10 @@ def run_xgen_job(self, job_id: str):
                     }
                     db.add(dataset)
                     db.commit()
+            if stage == "RENDER_PREVIEWS":
+                # When running pose-only mode, preview artifacts are already generated during ESTIMATE_POSE.
+                # Keep this stage as a no-op so the UI can show a clean 3-step pipeline.
+                pass
         _update_job_status(db, job, "COMPLETED")
         log_lines.append(f"{datetime.utcnow().isoformat()}Z status=COMPLETED")
         try:

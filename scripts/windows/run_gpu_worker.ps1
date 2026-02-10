@@ -22,6 +22,9 @@ if ($MacIp) {
   $env:S3_BUCKET = "humanx-dev"
 }
 
+$env:HAN_WORKER_ROLE = "gpu"
+$env:HAN_WORKER_QUEUES = "gpu"
+
 foreach ($k in @("REDIS_URL", "DATABASE_URL", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET")) {
   $val = ""
   try {

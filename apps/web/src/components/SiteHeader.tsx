@@ -3,6 +3,7 @@ import { LinkButton } from "./ui/Button";
 
 const nav = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/gvhmr", label: "GVHMR" },
   { href: "/demos/new", label: "New Demo" },
   { href: "/datasets", label: "Datasets" },
   { href: "/training", label: "Training" },
