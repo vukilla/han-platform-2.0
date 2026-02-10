@@ -157,7 +157,11 @@ if ($TryDownloadHeavyCheckpoints) {
     Invoke-CmdChecked "`"$isaacLabBat`" -p -m pip install gdown"
   }
   # Download into the staged checkpoint root.
-  Invoke-CmdChecked "`"$isaacLabBat`" -p -m gdown --folder `"$folderUrl`" --output `"$stagedCkptRoot`""
+  # NOTE: Google Drive frequently rate-limits large public files. Treat this as best-effort.
+  cmd /c "`"$isaacLabBat`" -p -m gdown --folder `"$folderUrl`" --output `"$stagedCkptRoot`""
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "[WARN] gdown folder download failed (exit=$LASTEXITCODE). Will fall back to alternative mirrors where possible." -ForegroundColor Yellow
+  }
 }
 
 Write-Host ""
@@ -165,6 +169,21 @@ Write-Host "Remaining required checkpoint files (manual download may be needed):
 Write-Host "  - dpvo\\dpvo.pth"
 Write-Host "  - vitpose\\vitpose-h-multi-coco.pth"
 Write-Host "  - hmr2\\epoch=10-step=25000.ckpt"
+
+if ($TryDownloadHeavyCheckpoints) {
+  # If Google Drive is rate-limited, try a HuggingFace mirror for the ViTPose checkpoint.
+  $vitposeCkpt = Join-Path $stagedCkptRoot "vitpose\\vitpose-h-multi-coco.pth"
+  if (-not (Test-Path $vitposeCkpt)) {
+    Write-Host ""
+    Write-Host "-- Fallback: Download vitpose-h-multi-coco.pth from HuggingFace --" -ForegroundColor Cyan
+    try {
+      Download-File "https://huggingface.co/camenduru/GVHMR/resolve/main/vitpose/vitpose-h-multi-coco.pth?download=true" $vitposeCkpt
+    } catch {
+      Write-Host "[WARN] HuggingFace download failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+  }
+}
+
 Write-Host ""
 Write-Host "Once checkpoints are in place, run the real smoke test from the Mac:" -ForegroundColor Green
 Write-Host "  ./scripts/smoke_e2e_with_gpu_real.sh"
