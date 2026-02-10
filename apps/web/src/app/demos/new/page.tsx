@@ -12,6 +12,8 @@ export default function NewDemoPage() {
   const [file, setFile] = useState<File | null>(null);
   const [robotModel, setRobotModel] = useState("unitree-g1");
   const [objectId, setObjectId] = useState("cargo_box");
+  const [poseEstimator, setPoseEstimator] = useState<"placeholder" | "gvhmr" | "none">("placeholder");
+  const [gvhmrStaticCam, setGvhmrStaticCam] = useState(true);
   const [tsStart, setTsStart] = useState("0.5");
   const [tsEnd, setTsEnd] = useState("8.0");
   const [anchorType, setAnchorType] = useState("palms_midpoint");
@@ -71,9 +73,8 @@ export default function NewDemoPage() {
       });
 
       setStatus("Starting XGen job...");
-      const job = await runXgen(demo.id, {
+      const xgenParams: Record<string, unknown> = {
         video_uri: upload.video_uri,
-        placeholder_pose: true,
         object_id: objectId,
         object_pose: {
           x: Number(objectPose.x),
@@ -83,6 +84,25 @@ export default function NewDemoPage() {
           pitch: Number(objectPose.pitch),
           yaw: Number(objectPose.yaw),
         },
+      };
+
+      if (poseEstimator === "placeholder") {
+        xgenParams.placeholder_pose = true;
+      } else if (poseEstimator === "gvhmr") {
+        xgenParams.requires_gpu = true;
+        xgenParams.pose_estimator = "gvhmr";
+        xgenParams.gvhmr_static_cam = Boolean(gvhmrStaticCam);
+        // Keep these small for interactive iteration.
+        xgenParams.clip_count = 3;
+        xgenParams.frames = 40;
+        xgenParams.nq = 12;
+        xgenParams.contact_dim = 4;
+      } else {
+        xgenParams.pose_estimator = "none";
+      }
+
+      const job = await runXgen(demo.id, {
+        ...xgenParams,
       });
       setJobId(job.id);
       setStatus("XGen job started.");
@@ -241,7 +261,36 @@ export default function NewDemoPage() {
         </Card>
 
         <Card className="space-y-4">
-          <h2 className="text-xl font-semibold text-black">5. Launch XGen job</h2>
+          <h2 className="text-xl font-semibold text-black">5. Pose extraction</h2>
+          <p className="text-sm">Choose how the platform estimates human motion. Default is fastest.</p>
+          <select
+            className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+            value={poseEstimator}
+            onChange={(event) => setPoseEstimator(event.target.value as "placeholder" | "gvhmr" | "none")}
+          >
+            <option value="placeholder">Placeholder (fast, plumbing)</option>
+            <option value="gvhmr">GVHMR (real, runs on Windows GPU worker)</option>
+            <option value="none">Skip</option>
+          </select>
+          {poseEstimator === "gvhmr" ? (
+            <label className="flex items-center gap-2 text-sm text-black/70">
+              <input
+                type="checkbox"
+                checked={gvhmrStaticCam}
+                onChange={(event) => setGvhmrStaticCam(event.target.checked)}
+              />
+              Static camera (recommended for phone videos)
+            </label>
+          ) : null}
+          {poseEstimator === "gvhmr" ? (
+            <p className="text-xs text-black/60">
+              Requires Windows GPU worker and GVHMR checkpoints. If this fails, see <code>docs/GVHMR.md</code>.
+            </p>
+          ) : null}
+        </Card>
+
+        <Card className="space-y-4">
+          <h2 className="text-xl font-semibold text-black">6. Launch XGen job</h2>
           <p className="text-sm">We will run pose extraction, retargeting, contact synthesis, and augmentation.</p>
           <Button onClick={handleRun}>Start XGen</Button>
           {status ? <p className="text-sm text-emerald-700">{status}</p> : null}
