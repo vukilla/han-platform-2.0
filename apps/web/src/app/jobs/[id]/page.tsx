@@ -286,6 +286,20 @@ export default function JobProgressPage() {
         </Card>
       ) : null}
 
+      {onlyPose && jobIsComplete && poseOk === false ? (
+        <Card className="space-y-2">
+          <h2 className="text-lg font-semibold text-black">GVHMR ran with a fallback</h2>
+          <p className="text-sm text-black/70">
+            The most common cause is a missing licensed SMPL-X model file (<span className="font-mono">SMPLX_NEUTRAL.npz</span>).
+            Upload it in <span className="font-mono">/gvhmr</span>, then rerun this job.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button onClick={handleRequeue}>Rerun GVHMR</Button>
+            {requeueStatus ? <span className="text-sm text-black/70">{requeueStatus}</span> : null}
+          </div>
+        </Card>
+      ) : null}
+
       <Card className="space-y-6">
         {stages.map((stage, index) => (
           <div key={stage} className="flex items-center justify-between border-b border-black/10 pb-4 last:border-none last:pb-0">
