@@ -31,8 +31,24 @@ if ($MacIp) {
   $env:S3_BUCKET = "humanx-dev"
 }
 
-$env:HAN_WORKER_ROLE = "gpu"
 $env:HAN_WORKER_QUEUES = $Queues
+
+# Heartbeat role is used by the Mac control-plane to detect which worker is online.
+# If we are only consuming the `pose` queue (GVHMR-only), advertise role=pose.
+$queueTokens = @()
+foreach ($part in ($Queues -split ",")) {
+  $t = ($part -as [string]).Trim().ToLower()
+  if ($t) { $queueTokens += $t }
+}
+$role = "cpu"
+if ($queueTokens -contains "gpu") {
+  $role = "gpu"
+} elseif ($queueTokens -contains "pose") {
+  $role = "pose"
+} elseif ($queueTokens.Count -gt 0) {
+  $role = $queueTokens[0]
+}
+$env:HAN_WORKER_ROLE = $role
 
 foreach ($k in @("REDIS_URL", "DATABASE_URL", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET")) {
   $val = ""

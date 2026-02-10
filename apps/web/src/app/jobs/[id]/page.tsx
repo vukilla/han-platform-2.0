@@ -6,7 +6,19 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { getDemo, getXgenJob, requeueXgenJob, runXmimic, DemoOut, XGenJobOut } from "@/lib/api";
+import {
+  getDemo,
+  getGvhmrSmplxModelStatus,
+  getXgenJob,
+  login,
+  requeueXgenJob,
+  runXmimic,
+  uploadGvhmrSmplxModel,
+  DemoOut,
+  GVHMRSmplxModelStatus,
+  XGenJobOut,
+} from "@/lib/api";
+import { getToken, setToken } from "@/lib/auth";
 
 const DEFAULT_ISAACLAB_NUM_ENVS = 8;
 const DEFAULT_ISAACLAB_UPDATES = 2;
@@ -31,8 +43,12 @@ export default function JobProgressPage() {
   const [job, setJob] = useState<XGenJobOut | null>(null);
   const [demo, setDemo] = useState<DemoOut | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [poseReady, setPoseReady] = useState<boolean | null>(null);
   const [gpuReady, setGpuReady] = useState<boolean | null>(null);
   const [jobLogTail, setJobLogTail] = useState<string | null>(null);
+  const [smplxStatus, setSmplxStatus] = useState<GVHMRSmplxModelStatus | null>(null);
+  const [smplxFile, setSmplxFile] = useState<File | null>(null);
+  const [smplxUploadStatus, setSmplxUploadStatus] = useState<string | null>(null);
   const requestedTrainMode: "nep" | "mocap" = searchParams?.get("train_mode") === "mocap" ? "mocap" : "nep";
   const requestedTrainBackend: "synthetic" | "isaaclab_teacher_ppo" =
     searchParams?.get("train_backend") === "isaaclab_teacher_ppo" ? "isaaclab_teacher_ppo" : "synthetic";
@@ -45,6 +61,14 @@ export default function JobProgressPage() {
   const [xmimicJobId, setXmimicJobId] = useState<string | null>(null);
   const autoTrainTriggered = useRef(false);
   const [requeueStatus, setRequeueStatus] = useState<string | null>(null);
+
+  const onlyPose = Boolean(job?.params_json?.only_pose);
+
+  async function ensureLoggedIn() {
+    if (getToken()) return;
+    const resp = await login("demo@humanx.local", "Demo");
+    setToken(resp.token);
+  }
 
   useEffect(() => {
     let timer: NodeJS.Timeout | null = null;
@@ -73,13 +97,14 @@ export default function JobProgressPage() {
   }, [jobId]);
 
   useEffect(() => {
-    if (!job?.logs_uri) return;
+    const logsUri = job?.logs_uri;
+    if (!logsUri) return;
     let timer: NodeJS.Timeout | null = null;
     let cancelled = false;
 
     async function fetchLogs() {
       try {
-        const res = await fetch(job.logs_uri as string);
+        const res = await fetch(logsUri as string);
         if (!res.ok) return;
         const text = await res.text();
         const tail = text.split("\n").slice(-200).join("\n");
@@ -113,12 +138,47 @@ export default function JobProgressPage() {
     };
   }, [job?.demo_id]);
 
+  useEffect(() => {
+    if (!onlyPose) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        await ensureLoggedIn();
+        const status = await getGvhmrSmplxModelStatus();
+        if (!cancelled) setSmplxStatus(status);
+      } catch {
+        if (!cancelled) setSmplxStatus(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [onlyPose]);
+
+  async function handleUploadSmplx() {
+    setSmplxUploadStatus(null);
+    setError(null);
+    if (!smplxFile) {
+      setError("Select `SMPLX_NEUTRAL.npz` first.");
+      return;
+    }
+    try {
+      await ensureLoggedIn();
+      setSmplxUploadStatus("Uploading SMPL-X model...");
+      const status = await uploadGvhmrSmplxModel(smplxFile);
+      setSmplxStatus(status);
+      setSmplxUploadStatus("Uploaded. You can rerun the job now.");
+    } catch (err) {
+      setSmplxUploadStatus(null);
+      setError(err instanceof Error ? err.message : "Failed to upload SMPL-X model");
+    }
+  }
+
   const status = job?.status ?? null;
   const jobIsComplete = status === "COMPLETED";
   const jobIsFailed = status === "FAILED";
   const jobIsQueued = status === "QUEUED";
   const datasetId = typeof job?.params_json?.dataset_id === "string" ? job?.params_json?.dataset_id : null;
-  const onlyPose = Boolean(job?.params_json?.only_pose);
   const stages = onlyPose ? (["INGEST_VIDEO", "ESTIMATE_POSE", "RENDER_PREVIEWS"] as const) : fullStages;
   const stageNames: Record<string, string> = onlyPose
     ? {
@@ -134,8 +194,14 @@ export default function JobProgressPage() {
     const poll = () => {
       fetch(`${apiUrl}/ops/workers?timeout=1.0`)
         .then((res) => (res.ok ? res.json() : null))
-        .then((data) => setGpuReady(Boolean(data?.has_gpu_queue)))
-        .catch(() => setGpuReady(null));
+        .then((data) => {
+          setPoseReady(Boolean(data?.has_pose_queue));
+          setGpuReady(Boolean(data?.has_gpu_queue));
+        })
+        .catch(() => {
+          setPoseReady(null);
+          setGpuReady(null);
+        });
     };
     poll();
     timer = setInterval(poll, 3000);
@@ -214,7 +280,7 @@ export default function JobProgressPage() {
           ? "Rendering preview..."
           : "Waiting for pose preview...";
 
-  const currentIndex = status ? stages.indexOf(status) : -1;
+  const currentIndex = status ? (stages as readonly string[]).indexOf(status) : -1;
   const stageLabel = (index: number) => {
     if (jobIsComplete) return "Completed";
     if (jobIsFailed) return "Failed";
@@ -261,14 +327,14 @@ export default function JobProgressPage() {
         </div>
       </section>
 
-      {onlyPose && waitingForWorker && gpuReady === false ? (
+      {onlyPose && waitingForWorker && poseReady === false ? (
         <Card className="space-y-2">
-          <h2 className="text-lg font-semibold text-black">Waiting for Windows GPU worker</h2>
+          <h2 className="text-lg font-semibold text-black">Waiting for Windows pose worker</h2>
           <p className="text-sm text-black/70">
-            This job requires the GPU worker. Start it on your Windows PC, then this page will update automatically.
+            This job requires the Windows worker to be running (queue: pose). Start it on your Windows PC, then this page will update automatically.
           </p>
           <p className="text-sm font-mono text-black/70">
-            scripts\\windows\\one_click_gpu_worker.ps1 -MacIp &lt;MAC_LAN_IP&gt; -IsaacSimPath C:\\isaacsim
+            scripts\\windows\\one_click_gpu_worker.ps1 -MacIp &lt;MAC_LAN_IP&gt; -IsaacSimPath C:\\isaacsim -Queues pose
           </p>
         </Card>
       ) : null}
@@ -291,8 +357,26 @@ export default function JobProgressPage() {
           <h2 className="text-lg font-semibold text-black">GVHMR ran with a fallback</h2>
           <p className="text-sm text-black/70">
             The most common cause is a missing licensed SMPL-X model file (<span className="font-mono">SMPLX_NEUTRAL.npz</span>).
-            Upload it in <span className="font-mono">/gvhmr</span>, then rerun this job.
+            Upload it below (or in <span className="font-mono">/gvhmr</span>), then rerun this job.
           </p>
+          {smplxStatus?.exists === false ? (
+            <div className="space-y-2 rounded-2xl border border-black/10 bg-black/[0.02] p-4">
+              <p className="text-sm font-semibold text-black">One-time setup: Upload SMPL-X model</p>
+              <input
+                type="file"
+                accept=".npz"
+                onChange={(event) => setSmplxFile(event.target.files?.[0] ?? null)}
+                className="w-full rounded-2xl border border-black/15 bg-white px-4 py-3 text-sm"
+              />
+              <div className="flex flex-wrap items-center gap-3">
+                <Button onClick={handleUploadSmplx} disabled={!smplxFile}>
+                  Upload SMPL-X model
+                </Button>
+                {smplxUploadStatus ? <span className="text-sm text-black/70">{smplxUploadStatus}</span> : null}
+              </div>
+              <p className="text-xs text-black/60">Download instructions: `docs/GVHMR.md`</p>
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center gap-3">
             <Button onClick={handleRequeue}>Rerun GVHMR</Button>
             {requeueStatus ? <span className="text-sm text-black/70">{requeueStatus}</span> : null}

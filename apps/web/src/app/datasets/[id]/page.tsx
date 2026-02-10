@@ -44,14 +44,15 @@ export default function DatasetDetailPage() {
     if (!datasetId) {
       return;
     }
+    const id = datasetId;
     let cancelled = false;
 
     async function load() {
       try {
         setLoading(true);
         const [datasetResponse, clipResponse] = await Promise.all([
-          getDataset(datasetId),
-          listDatasetClips(datasetId),
+          getDataset(id),
+          listDatasetClips(id),
         ]);
         if (cancelled) return;
         setDataset(datasetResponse);

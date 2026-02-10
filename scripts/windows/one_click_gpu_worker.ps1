@@ -72,5 +72,11 @@ Write-Host "-- Starting GPU worker (detached) --" -ForegroundColor Cyan
 powershell -NoProfile -ExecutionPolicy Bypass -File $startDetached -MacIp $MacIp -Queues $Queues
 
 Write-Host ""
-Write-Host "Next (Mac): run the full smoke test:" -ForegroundColor Green
-Write-Host "  ./scripts/smoke_e2e_with_gpu.sh"
+Write-Host "Next (Mac):" -ForegroundColor Green
+if ($Queues.ToLower().Contains("pose") -and -not $Queues.ToLower().Contains("gpu")) {
+  Write-Host "  Open: http://localhost:3000/gvhmr"
+  Write-Host "  Upload a video and click Run."
+} else {
+  Write-Host "  Run the full smoke test:"
+  Write-Host "    ./scripts/smoke_e2e_with_gpu.sh"
+}

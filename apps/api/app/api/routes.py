@@ -644,6 +644,7 @@ def list_workers(timeout: float = 2.0, include_stats: bool = False) -> dict[str,
             "timeout": timeout,
             "worker_names": [],
             "has_gpu_queue": False,
+            "has_pose_queue": False,
             "ping": {},
             "active_queues": {},
             "stats": {},
@@ -654,6 +655,7 @@ def list_workers(timeout: float = 2.0, include_stats: bool = False) -> dict[str,
     # Celery remote-control in mixed Docker/Windows setups.
     heartbeat_workers: list[dict[str, Any]] = []
     heartbeat_has_gpu = False
+    heartbeat_has_pose = False
     try:
         client = redis.Redis.from_url(settings.redis_url)
         for key in client.scan_iter(match="han:worker_heartbeat:*", count=100):
@@ -671,9 +673,12 @@ def list_workers(timeout: float = 2.0, include_stats: bool = False) -> dict[str,
             heartbeat_workers.append({"worker_name": worker_name, "role": role})
             if role == settings.celery_gpu_queue:
                 heartbeat_has_gpu = True
+            if role == settings.celery_pose_queue:
+                heartbeat_has_pose = True
     except Exception:
         heartbeat_workers = []
         heartbeat_has_gpu = False
+        heartbeat_has_pose = False
 
     worker_names = sorted(
         set(ping.keys())
@@ -688,11 +693,19 @@ def list_workers(timeout: float = 2.0, include_stats: bool = False) -> dict[str,
     )
     has_gpu_queue = bool(has_gpu_queue or heartbeat_has_gpu)
 
+    has_pose_queue = any(
+        (q or {}).get("name") == settings.celery_pose_queue
+        for qlist in (queues or {}).values()
+        for q in (qlist or [])
+    )
+    has_pose_queue = bool(has_pose_queue or heartbeat_has_pose)
+
     return {
         "ok": True,
         "timeout": timeout,
         "worker_names": worker_names,
         "has_gpu_queue": has_gpu_queue,
+        "has_pose_queue": has_pose_queue,
         "ping": ping,
         "active_queues": queues,
         "stats": stats,

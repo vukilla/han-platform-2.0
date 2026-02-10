@@ -24,7 +24,7 @@ export default function GVHMRPage() {
   const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
   const [gvhmrStaticCam, setGvhmrStaticCam] = useState(true);
   const [quickTrim, setQuickTrim] = useState(true);
-  const [gpuReady, setGpuReady] = useState<boolean | null>(null);
+  const [poseReady, setPoseReady] = useState<boolean | null>(null);
   const [smplxStatus, setSmplxStatus] = useState<GVHMRSmplxModelStatus | null>(null);
   const [smplxFile, setSmplxFile] = useState<File | null>(null);
   const [smplxUploadStatus, setSmplxUploadStatus] = useState<string | null>(null);
@@ -37,8 +37,8 @@ export default function GVHMRPage() {
     const poll = () => {
       fetch(`${apiUrl}/ops/workers?timeout=1.0`)
         .then((res) => (res.ok ? res.json() : null))
-        .then((data) => setGpuReady(Boolean(data?.has_gpu_queue)))
-        .catch(() => setGpuReady(null));
+        .then((data) => setPoseReady(Boolean(data?.has_pose_queue)))
+        .catch(() => setPoseReady(null));
     };
     poll();
     timer = setInterval(poll, 3000);
@@ -103,8 +103,8 @@ export default function GVHMRPage() {
       setError("Select a video file first.");
       return;
     }
-    if (gpuReady === false) {
-      setError("GPU worker is offline. Start the Windows GPU worker first, then try again.");
+    if (poseReady === false) {
+      setError("Pose worker is offline. Start the Windows worker first, then try again.");
       return;
     }
     try {
@@ -157,8 +157,10 @@ export default function GVHMRPage() {
           <h2 className="text-xl font-semibold text-black">Upload</h2>
           <div className="flex flex-wrap items-center gap-3">
             <Badge
-              label={gpuReady === true ? "GPU worker connected" : gpuReady === false ? "GPU worker offline" : "GPU status unknown"}
-              tone={gpuReady === true ? "emerald" : gpuReady === false ? "rose" : "amber"}
+              label={
+                poseReady === true ? "Pose worker connected" : poseReady === false ? "Pose worker offline" : "Worker status unknown"
+              }
+              tone={poseReady === true ? "emerald" : poseReady === false ? "rose" : "amber"}
             />
             <Badge
               label={
@@ -214,14 +216,19 @@ export default function GVHMRPage() {
             <video className="w-full rounded-2xl border border-black/10 bg-black" controls playsInline src={localPreviewUrl} />
           </div>
         ) : null}
-        <label className="flex items-center gap-2 text-sm text-black/70">
-          <input type="checkbox" checked={gvhmrStaticCam} onChange={(event) => setGvhmrStaticCam(event.target.checked)} />
-          Static camera (recommended)
-        </label>
-        <label className="flex items-center gap-2 text-sm text-black/70">
-          <input type="checkbox" checked={quickTrim} onChange={(event) => setQuickTrim(event.target.checked)} />
-          Quick preview (trim to first 12 seconds)
-        </label>
+        <details className="rounded-2xl border border-black/10 bg-black/[0.02] p-4">
+          <summary className="cursor-pointer text-sm font-semibold text-black">Advanced options</summary>
+          <div className="mt-3 space-y-3">
+            <label className="flex items-center gap-2 text-sm text-black/70">
+              <input type="checkbox" checked={gvhmrStaticCam} onChange={(event) => setGvhmrStaticCam(event.target.checked)} />
+              Static camera (recommended)
+            </label>
+            <label className="flex items-center gap-2 text-sm text-black/70">
+              <input type="checkbox" checked={quickTrim} onChange={(event) => setQuickTrim(event.target.checked)} />
+              Quick preview (trim to first 12 seconds)
+            </label>
+          </div>
+        </details>
         <Button onClick={handleRun} disabled={!file}>
           Run GVHMR
         </Button>

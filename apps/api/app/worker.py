@@ -65,10 +65,23 @@ def _detect_worker_role() -> str:
     role = (os.environ.get("HAN_WORKER_ROLE") or "").strip().lower()
     if role:
         return role
-    argv = " ".join(sys.argv).lower()
-    if " -q " in f" {argv} " or " --queues " in f" {argv} ":
-        if "gpu" in argv:
+
+    # Prefer the configured queue list (set by our Windows/mac scripts).
+    queues_env = (os.environ.get("HAN_WORKER_QUEUES") or "").strip().lower()
+    if queues_env:
+        if "gpu" in queues_env:
             return "gpu"
+        if "pose" in queues_env:
+            return "pose"
+        if "cpu" in queues_env:
+            return "cpu"
+
+    argv = " ".join(sys.argv).lower()
+    # Best-effort parsing: Celery embeds queue names in argv (`-Q pose` etc).
+    if "pose" in argv:
+        return "pose"
+    if "gpu" in argv:
+        return "gpu"
     return "cpu"
 
 
@@ -572,9 +585,10 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
             h_in = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 360)
             cap.release()
 
-            target_h = min(720, int(h_in))
-            scale = float(target_h) / float(max(1, h_in))
-            target_w = max(1, int(round(w_in * scale)))
+            # Keep the placeholder preview at the exact same resolution as the input video so
+            # the Web UI can display both panels at the same size.
+            target_w = int(w_in)
+            target_h = int(h_in)
 
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             preview_out = out_dir / "gvhmr_preview.mp4"

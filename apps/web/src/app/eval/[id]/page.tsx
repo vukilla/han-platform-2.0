@@ -26,12 +26,13 @@ export default function EvalReportPage() {
 
   useEffect(() => {
     if (!evalId) return;
+    const id = evalId;
     let cancelled = false;
 
     async function load() {
       try {
         setLoading(true);
-        const response = await getEval(evalId);
+        const response = await getEval(id);
         if (cancelled) return;
         setEvalRun(response);
         setError(null);

@@ -26,6 +26,13 @@ GVHMR expects the SMPL-X body model file:
 This file is **licensed** and is not distributed with this repository or with the GVHMR checkpoints.
 You must download it from the official SMPL-X model distribution.
 
+Practical steps (one-time):
+1. Go to the official SMPL-X website and request access / accept the license.
+2. Download the SMPL-X model package (the archive that contains `SMPLX_NEUTRAL.npz`).
+3. Extract `SMPLX_NEUTRAL.npz` from the archive. In most SMPL-X releases it lives under a path like:
+   - `models/smplx/SMPLX_NEUTRAL.npz`
+4. Upload `SMPLX_NEUTRAL.npz` once via the platform Web UI (`/gvhmr`) or the API endpoint below.
+
 Recommended: upload it once via the platform (avoids manual placement on the Windows GPU worker):
 - Web UI: `http://localhost:3000/gvhmr` (one-time setup section)
 - API: `POST /admin/gvhmr/smplx-model` (multipart form field `file`)

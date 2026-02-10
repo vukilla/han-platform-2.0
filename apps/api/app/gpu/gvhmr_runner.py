@@ -248,14 +248,12 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
     if w_in <= 0 or h_in <= 0:
         w_in, h_in = 640, 360
 
-    # Keep output aspect-ratio identical to the original video so the side-by-side UI aligns
-    # without awkward letterboxing or height mismatches.
-    target_h = min(720, int(h_in))
-    scale = float(target_h) / float(h_in)
-    target_w = max(1, int(round(w_in * scale)))
-
-    skel_w = target_w
-    skel_h = target_h
+    # Preserve the *exact* input resolution so the Web UI can display the original and GVHMR
+    # preview at the same size with no aspect-ratio drift from rounding.
+    #
+    # (We used to downscale to a max height, but users expect a 1:1 match with their upload.)
+    skel_w = int(w_in)
+    skel_h = int(h_in)
 
     x = joints_np[:, :, 0]
     y = joints_np[:, :, 1]
