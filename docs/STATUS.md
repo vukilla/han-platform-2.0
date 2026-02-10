@@ -5,6 +5,10 @@
 - API health check passes: `GET http://localhost:8000/health`
 - Web dev server loads (fixed linux native deps by isolating container `node_modules` volume)
 - Large external artifacts live inside the repo under `external/humanoid-projects/` (no separate `~/humanoid-projects` required on laptop)
+- Browser upload UX is reliable (no MinIO CORS required):
+  - `POST /demos/{id}/upload` streams the video to MinIO
+  - `/gvhmr` and `/demos/new` use the API upload path by default
+- `/gvhmr` supports a "Quick preview" mode (trim to the first 12 seconds) to keep GVHMR demos responsive
 - Windows GPU worker (Isaac Sim + Isaac Lab) can now run:
   - Real XGen pose extraction via GVHMR (video -> SMPL-X NPZ), uploaded to MinIO
   - Real PPO teacher checkpoint generation via Isaac Lab (Franka cube lift as the current "cargo pickup" baseline), uploaded to MinIO
