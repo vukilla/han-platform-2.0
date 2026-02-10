@@ -60,6 +60,29 @@ def _gvhmr_python_cmd() -> list[str]:
     return [sys.executable]
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    """Parse an env var as a boolean.
+
+    Empty/unset => default. Truthy values: 1/true/yes/y/on.
+    """
+    raw = os.environ.get(name, None)
+    if raw is None:
+        return default
+    val = str(raw).strip().lower()
+    if not val:
+        return default
+    return val in ("1", "true", "yes", "y", "on")
+
+
+def _can_import_pytorch3d_renderer() -> bool:
+    try:
+        import pytorch3d.renderer  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
 def _required_checkpoint_relpaths(*, require_dpvo: bool) -> list[Path]:
     required = [
         Path("gvhmr") / "gvhmr_siga24_release.ckpt",
@@ -551,10 +574,10 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         "--output_root",
         str(output_root),
     ]
-    # By default we skip GVHMR's native mesh renderer because `pytorch3d` renderer/structures is
-    # often unavailable on Windows Isaac Sim Python. If you manage to install it, you can enable
-    # the native render videos by setting `GVHMR_NATIVE_RENDER=1` on the GPU worker.
-    enable_native_render = str(os.environ.get("GVHMR_NATIVE_RENDER", "0") or "0").strip().lower() in ("1", "true", "yes")
+    # Native mesh rendering:
+    # - If `GVHMR_NATIVE_RENDER` is explicitly set, honor it.
+    # - Otherwise, auto-enable it when `pytorch3d.renderer` is importable.
+    enable_native_render = _env_bool("GVHMR_NATIVE_RENDER", default=_can_import_pytorch3d_renderer())
     if not enable_native_render:
         # Requires our patched GVHMR demo that supports skipping rendering (avoids pytorch3d renderer dependency).
         cmd.append("--skip_render")
@@ -576,9 +599,8 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         # GVHMR's "incam" overlay video for the preview.
         env.setdefault("GVHMR_RENDER_INCAM", "0")
 
-        # Prebuilt PyTorch3D CUDA wheels are often missing sm_120 kernels (RTX 5090),
-        # so default to CPU rendering unless the user explicitly overrides.
-        env.setdefault("GVHMR_RENDER_DEVICE", "cpu")
+        # Default to CUDA rendering (fast). GVHMR will fall back to CPU if rasterization fails.
+        env.setdefault("GVHMR_RENDER_DEVICE", "cuda")
 
     # The Windows bootstrap installs a minimal `external/gvhmr/pytorch3d` stub so GVHMR can
     # run inference without the full PyTorch3D renderer. When native rendering is enabled
@@ -587,6 +609,12 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
     stub_dir = gvhmr_root / "pytorch3d"
     stub_backup = gvhmr_root / "pytorch3d_stub_han"
     moved_stub = False
+    # If a prior run crashed mid-rename, restore the stub so future `--skip_render` runs still work.
+    if stub_backup.exists() and (not stub_dir.exists()) and stub_backup.is_dir():
+        try:
+            stub_backup.rename(stub_dir)
+        except Exception:
+            pass
     if enable_native_render and stub_dir.exists() and stub_dir.is_dir():
         try:
             if stub_backup.exists():

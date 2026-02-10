@@ -52,14 +52,13 @@ $env:HAN_WORKER_ROLE = $role
 
 # GVHMR mesh preview rendering:
 # - Enable GVHMR's native render videos so the Studio preview can show a real body mesh.
-# - Default to CPU rendering for now on RTX 5090 (sm_120) because most prebuilt PyTorch3D CUDA
-#   wheels lack kernels for this architecture; CPU rendering is slower but reliable.
+# - Default to CUDA rendering (fast). Our GVHMR patch will fall back to CPU if rasterization fails.
 # - Skip the "incam" overlay video since Studio already shows the original input video on the left.
 if (-not $env:GVHMR_NATIVE_RENDER) {
   $env:GVHMR_NATIVE_RENDER = "1"
 }
 if (-not $env:GVHMR_RENDER_DEVICE) {
-  $env:GVHMR_RENDER_DEVICE = "cpu"
+  $env:GVHMR_RENDER_DEVICE = "cuda"
 }
 if (-not $env:GVHMR_RENDER_INCAM) {
   $env:GVHMR_RENDER_INCAM = "0"
