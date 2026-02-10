@@ -73,7 +73,7 @@ index 6ef3897..55c80e8 100644
  try:
      from hmr4d.utils.preproc.slam import SLAMModel
 diff --git a/hmr4d/utils/preproc/tracker.py b/hmr4d/utils/preproc/tracker.py
-index b093ed4..74c0195 100644
+index b093ed4..2741e83 100644
 --- a/hmr4d/utils/preproc/tracker.py
 +++ b/hmr4d/utils/preproc/tracker.py
 @@ -16,9 +16,41 @@ from hmr4d.utils.video_io_utils import get_video_lwh
@@ -118,6 +118,33 @@ index b093ed4..74c0195 100644
          self.yolo = YOLO(PROJ_ROOT / "inputs/checkpoints/yolo/yolov8x.pt")
  
      def track(self, video_path):
+@@ -30,14 +62,19 @@ class Tracker:
+             "verbose": False,
+             "stream": True,
+         }
+-        results = self.yolo.track(video_path, **cfg)
+-        # frame-by-frame tracking
+-        track_history = []
+-        for result in tqdm(results, total=get_video_lwh(video_path)[0], desc="YoloV8 Tracking"):
+-            if result.boxes.id is not None:
+-                track_ids = result.boxes.id.int().cpu().tolist()  # (N)
++        # NOTE: Avoid Ultralytics `.track()` on Windows because it pulls in tracking
++        # dependencies (e.g. `lap/lapx`) and can attempt runtime `pip install`.
++        # For GVHMR preprocessing we only need a single-person bbox per frame, so
++        # `.predict()` is sufficient and much more robust.
++        results = self.yolo.predict(video_path, **cfg)
++        for result in tqdm(results, total=get_video_lwh(video_path)[0], desc="YoloV8 Detect"):
++            if result.boxes is not None and result.boxes.xyxy is not None and result.boxes.xyxy.shape[0] > 0:
+                 bbx_xyxy = result.boxes.xyxy.cpu().numpy()  # (N, 4)
+-                result_frame = [{"id": track_ids[i], "bbx_xyxy": bbx_xyxy[i]} for i in range(len(track_ids))]
++                best_idx = 0
++                if getattr(result.boxes, "conf", None) is not None and result.boxes.conf.shape[0] == bbx_xyxy.shape[0]:
++                    best_idx = int(result.boxes.conf.argmax().item())
++                # Single tracked ID (person=0) for downstream code.
++                result_frame = [{"id": 0, "bbx_xyxy": bbx_xyxy[best_idx]}]
+             else:
+                 result_frame = []
+             track_history.append(result_frame)
 diff --git a/hmr4d/utils/vis/renderer.py b/hmr4d/utils/vis/renderer.py
 index f4d6232..0f47a5a 100644
 --- a/hmr4d/utils/vis/renderer.py
