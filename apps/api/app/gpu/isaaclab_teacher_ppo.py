@@ -169,6 +169,25 @@ def train_teacher_ppo(
 
     try:
         # Import Isaac Lab only after SimulationApp is live.
+        #
+        # Isaac Lab tasks expect `/persistent/isaac/asset_root/cloud` to be set so
+        # `isaaclab.utils.assets` can resolve omniverse:// paths (for example, Franka USD).
+        # When running headless, this can be unset and resolve to "None/...".
+        try:
+            import carb
+
+            s = carb.settings.get_settings()
+            key = "/persistent/isaac/asset_root/cloud"
+            cur = s.get(key)
+            if not cur:
+                # Public, read-only asset server used by Isaac Sim / Isaac Lab.
+                # This keeps a Windows-only baseline working without requiring users to install/run Nucleus locally.
+                root = os.environ.get("ISAAC_ASSET_ROOT") or "omniverse://ov-content/NVIDIA/Assets"
+                s.set(key, root)
+                log(f"[isaacsim] set {key}={root}")
+        except Exception as exc:
+            log(f"[WARN] failed to configure Isaac asset root: {exc}")
+
         from isaaclab.envs import ManagerBasedRLEnv
 
         # Env config
