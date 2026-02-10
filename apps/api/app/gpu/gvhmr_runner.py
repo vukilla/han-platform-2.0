@@ -571,6 +571,15 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
     gvhmr_pp = str(gvhmr_root)
     env["PYTHONPATH"] = gvhmr_pp if not pythonpath else (gvhmr_pp + os.pathsep + pythonpath)
 
+    if enable_native_render:
+        # Our Studio UI already shows the original video on the left, so we don't need
+        # GVHMR's "incam" overlay video for the preview.
+        env.setdefault("GVHMR_RENDER_INCAM", "0")
+
+        # Prebuilt PyTorch3D CUDA wheels are often missing sm_120 kernels (RTX 5090),
+        # so default to CPU rendering unless the user explicitly overrides.
+        env.setdefault("GVHMR_RENDER_DEVICE", "cpu")
+
     # The Windows bootstrap installs a minimal `external/gvhmr/pytorch3d` stub so GVHMR can
     # run inference without the full PyTorch3D renderer. When native rendering is enabled
     # (GVHMR_NATIVE_RENDER=1), the stub would shadow the real `pytorch3d` package in
