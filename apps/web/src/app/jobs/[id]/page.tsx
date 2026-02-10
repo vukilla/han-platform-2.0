@@ -357,7 +357,7 @@ export default function JobProgressPage() {
           <h2 className="text-lg font-semibold text-black">Motion recovery ran with a fallback</h2>
           <p className="text-sm text-black/70">
             The most common cause is a missing licensed SMPL-X model file (<span className="font-mono">SMPLX_NEUTRAL.npz</span>).
-            Upload it below (or in <span className="font-mono">/gvhmr</span>), then rerun this job.
+            Upload it below (or in <span className="font-mono">/studio</span>), then rerun this job.
           </p>
           {smplxStatus?.exists === false ? (
             <div className="space-y-2 rounded-2xl border border-black/10 bg-black/[0.02] p-4">

@@ -15,6 +15,8 @@
   - Upload video, click `Run motion recovery`, job page shows side-by-side:
     - Original video
     - GVHMR 3D skeleton preview (same resolution as the original)
+- CLI smoke test (motion recovery) works:
+  - `/Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/smoke_motion_recovery.sh`
 - Navigation simplified:
   - Top nav: Dashboard, Studio, Rewards, Deploy (Coming soon)
   - `/` redirects to `/dashboard`
@@ -23,7 +25,7 @@
 Real GVHMR requires the SMPL-X model file `SMPLX_NEUTRAL.npz` (licensed, not bundled).
 
 One-time setup:
-- Upload via Web UI: `http://localhost:3000/studio` (preferred) or `http://localhost:3000/gvhmr`
+- Upload via Web UI: `http://localhost:3000/studio` (preferred)
 - Or API: `POST /admin/gvhmr/smplx-model` (multipart field `file`)
 
 Details: `/Users/robertvukosa/Downloads/Python/han-platform-2.0/docs/GVHMR.md`

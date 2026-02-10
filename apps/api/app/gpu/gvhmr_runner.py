@@ -131,7 +131,7 @@ def _ensure_checkpoints(gvhmr_root: Path, *, require_dpvo: bool) -> None:
             + "\n\n"
             "This includes the SMPL-X model file `SMPLX_NEUTRAL.npz` (licensed; you must download it separately)\n"
             f"and place it under: {smplx_hint}\n\n"
-            "Tip: for the platform flow, you can upload this file once via the Web UI (`/gvhmr`) or API:\n"
+            "Tip: for the platform flow, you can upload this file once via the Web UI (`/studio`) or API:\n"
             "  POST /admin/gvhmr/smplx-model\n"
             "It will be stored under the object-storage key:\n"
             "  gvhmr/body_models/smplx/SMPLX_NEUTRAL.npz\n"

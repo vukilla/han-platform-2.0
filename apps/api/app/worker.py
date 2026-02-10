@@ -608,7 +608,7 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
                 )
                 cv2.putText(
                     banner,
-                    "Upload SMPLX_NEUTRAL.npz in /gvhmr",
+                    "Upload SMPLX_NEUTRAL.npz in /studio",
                     (16, 110),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.7,

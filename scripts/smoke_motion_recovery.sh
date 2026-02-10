@@ -97,14 +97,14 @@ while true; do
     break
   fi
   if [[ "$STATUS" == "FAILED" ]]; then
-    echo "Job failed: $(printf '%s' "$JOB_JSON" | python -c 'import json,sys; print(json.load(sys.stdin).get(\"error\"))')" >&2
+    echo "Job failed: $(printf '%s' "$JOB_JSON" | python -c 'import json,sys; print(json.load(sys.stdin).get("error"))')" >&2
     exit 1
   fi
   sleep 2
 done
 
-POSE_OK="$(printf '%s' "$JOB_JSON" | python -c 'import json,sys; d=json.load(sys.stdin); print((d.get(\"params_json\") or {}).get(\"pose_ok\"))')"
-PREVIEW_URL="$(printf '%s' "$JOB_JSON" | python -c 'import json,sys; d=json.load(sys.stdin); print((d.get(\"params_json\") or {}).get(\"pose_preview_mp4_uri\",\"\"))')"
+POSE_OK="$(printf '%s' "$JOB_JSON" | python -c 'import json,sys; d=json.load(sys.stdin); print((d.get("params_json") or {}).get("pose_ok"))')"
+PREVIEW_URL="$(printf '%s' "$JOB_JSON" | python -c 'import json,sys; d=json.load(sys.stdin); print((d.get("params_json") or {}).get("pose_preview_mp4_uri",""))')"
 
 echo "== Verify preview size (best effort) =="
 if command -v ffprobe >/dev/null 2>&1 && [[ -n "$PREVIEW_URL" ]]; then
@@ -123,4 +123,3 @@ OK
 - preview:   $PREVIEW_URL
 
 EOF
-
