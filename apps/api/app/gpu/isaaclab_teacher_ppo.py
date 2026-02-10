@@ -99,9 +99,6 @@ def train_teacher_ppo(
 
     import torch
 
-    from isaaclab.app import AppLauncher
-    from isaaclab.envs import ManagerBasedRLEnv
-
     task = _normalize_task(cfg.task)
 
     def log(msg: str) -> None:
@@ -115,10 +112,18 @@ def train_teacher_ppo(
     os.environ.setdefault("PYTHONHASHSEED", str(cfg.seed))
     torch.manual_seed(cfg.seed)
 
-    log(f"[isaaclab] launching headless app device={cfg.device}")
-    app = AppLauncher({"headless": True, "device": cfg.device}).app
+    # IMPORTANT (Windows / Isaac Sim 5.x):
+    # `omni.*` modules (including `omni.timeline`) are only importable after Kit is initialized.
+    # Importing Isaac Lab modules too early can fail with `ModuleNotFoundError: omni.timeline`.
+    log(f"[isaacsim] launching headless SimulationApp device={cfg.device}")
+    from isaacsim import SimulationApp
+
+    simulation_app = SimulationApp({"headless": True})
 
     try:
+        # Import Isaac Lab only after SimulationApp is live.
+        from isaaclab.envs import ManagerBasedRLEnv
+
         # Env config
         if task == "cargo_pickup_franka":
             from isaaclab_tasks.manager_based.manipulation.lift.config.franka.joint_pos_env_cfg import (
@@ -255,6 +260,6 @@ def train_teacher_ppo(
         except Exception:
             pass
         try:
-            app.close()
+            simulation_app.close()
         except Exception:
             pass
