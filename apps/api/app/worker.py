@@ -12,7 +12,7 @@ from uuid import UUID
 
 import numpy as np
 from celery import Celery
-from kombu import Queue
+from kombu import Exchange, Queue
 
 from app.core.config import get_settings
 from app.core.alerts import send_alert
@@ -30,16 +30,18 @@ celery_app = Celery(
     backend=settings.redis_url,
 )
 
+cpu_exchange = Exchange(settings.celery_cpu_queue, type="direct")
+gpu_exchange = Exchange(settings.celery_gpu_queue, type="direct")
+
 celery_app.conf.update(
     task_default_queue=settings.celery_default_queue,
+    task_default_exchange=settings.celery_default_queue,
+    task_default_exchange_type="direct",
+    task_default_routing_key=settings.celery_default_queue,
     task_queues=[
-        Queue(settings.celery_cpu_queue),
-        Queue(settings.celery_gpu_queue),
+        Queue(settings.celery_cpu_queue, cpu_exchange, routing_key=settings.celery_cpu_queue),
+        Queue(settings.celery_gpu_queue, gpu_exchange, routing_key=settings.celery_gpu_queue),
     ],
-    task_routes={
-        "app.worker.run_xgen_job": {"queue": settings.celery_cpu_queue},
-        "app.worker.run_xmimic_job": {"queue": settings.celery_gpu_queue},
-    },
     worker_prefetch_multiplier=settings.celery_prefetch_multiplier,
     task_acks_late=settings.celery_task_acks_late,
     task_reject_on_worker_lost=settings.celery_reject_on_worker_lost,
