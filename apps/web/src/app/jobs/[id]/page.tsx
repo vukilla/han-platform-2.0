@@ -183,7 +183,7 @@ export default function JobProgressPage() {
   const stageNames: Record<string, string> = onlyPose
     ? {
         INGEST_VIDEO: "Upload video",
-        ESTIMATE_POSE: "Run GVHMR",
+        ESTIMATE_POSE: "Recover 3D motion",
         RENDER_PREVIEWS: "Render preview",
       }
     : {};
@@ -270,15 +270,15 @@ export default function JobProgressPage() {
   const demoVideo = demo?.video_uri ?? null;
   const previewMessage = jobIsComplete
     ? poseOk === false
-      ? "GVHMR fell back to a placeholder pose (no preview video). See the pose log below."
+      ? "Motion recovery fell back to a placeholder pose (no preview video). See the pose log below."
       : "Pose preview not available yet. See the pose log below if this persists."
     : jobIsFailed
       ? "Pose preview failed. See the worker error/logs."
       : status === "ESTIMATE_POSE"
-        ? "GVHMR running..."
+        ? "Recovering motion..."
         : status === "RENDER_PREVIEWS"
           ? "Rendering preview..."
-          : "Waiting for pose preview...";
+          : "Queued. Waiting for motion recovery to start...";
 
   const currentIndex = status ? (stages as readonly string[]).indexOf(status) : -1;
   const stageLabel = (index: number) => {
@@ -309,7 +309,7 @@ export default function JobProgressPage() {
       <section className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <p className="section-eyebrow">Job progress</p>
-          <h1 className="text-3xl font-semibold text-black">{onlyPose ? "GVHMR pose pipeline" : "XGen pipeline stages"}</h1>
+          <h1 className="text-3xl font-semibold text-black">{onlyPose ? "Motion recovery pipeline" : "Dataset generation pipeline"}</h1>
           {jobId ? <p className="mt-2 text-sm text-black/60">{jobId}</p> : null}
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -354,7 +354,7 @@ export default function JobProgressPage() {
 
       {onlyPose && jobIsComplete && poseOk === false ? (
         <Card className="space-y-2">
-          <h2 className="text-lg font-semibold text-black">GVHMR ran with a fallback</h2>
+          <h2 className="text-lg font-semibold text-black">Motion recovery ran with a fallback</h2>
           <p className="text-sm text-black/70">
             The most common cause is a missing licensed SMPL-X model file (<span className="font-mono">SMPLX_NEUTRAL.npz</span>).
             Upload it below (or in <span className="font-mono">/gvhmr</span>), then rerun this job.
@@ -378,7 +378,7 @@ export default function JobProgressPage() {
             </div>
           ) : null}
           <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={handleRequeue}>Rerun GVHMR</Button>
+            <Button onClick={handleRequeue}>Rerun motion recovery</Button>
             {requeueStatus ? <span className="text-sm text-black/70">{requeueStatus}</span> : null}
           </div>
         </Card>
@@ -409,7 +409,7 @@ export default function JobProgressPage() {
               )}
             </div>
             <div className="space-y-2">
-              <p className="text-sm font-semibold text-black/60">GVHMR preview</p>
+              <p className="text-sm font-semibold text-black/60">3D preview</p>
               {posePreview ? (
                 <video className="w-full rounded-2xl border border-black/10 bg-black" controls playsInline src={posePreview} />
               ) : demoVideo ? (
@@ -434,7 +434,7 @@ export default function JobProgressPage() {
           <h2 className="text-xl font-semibold text-black">Pose extraction</h2>
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <Badge
-              label={poseOk === true ? "GVHMR OK" : poseOk === false ? "GVHMR fallback" : "Unknown"}
+              label={poseOk === true ? "Pose OK" : poseOk === false ? "Pose fallback" : "Unknown"}
               tone={poseOk === true ? "emerald" : poseOk === false ? "rose" : "amber"}
             />
             {poseFallback ? <span className="text-black/70">fallback: {poseFallback}</span> : null}
@@ -451,7 +451,7 @@ export default function JobProgressPage() {
                 Download pose log
               </a>
             ) : null}
-            <span className="text-sm text-black/60">GVHMR setup: see `docs/GVHMR.md` in the repo</span>
+            <span className="text-sm text-black/60">Motion recovery setup: see `docs/GVHMR.md` in the repo</span>
           </div>
         </Card>
       ) : null}

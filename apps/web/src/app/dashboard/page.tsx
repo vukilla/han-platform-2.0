@@ -8,16 +8,16 @@ export default function DashboardPage() {
       <section className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <p className="section-eyebrow">Dashboard</p>
-          <h1 className="text-3xl font-semibold text-black">Projects, demos, datasets, policies.</h1>
+          <h1 className="text-3xl font-semibold text-black">Projects, runs, datasets, policies.</h1>
         </div>
-        <LinkButton href="/demos/new">New demo</LinkButton>
+        <LinkButton href="/studio">New upload</LinkButton>
       </section>
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card>
           <p className="text-sm font-semibold text-black/60">Active demos</p>
           <p className="mt-3 text-3xl font-semibold text-black">3</p>
-          <p className="text-sm">1 running XGen job, 2 ready for XMimic.</p>
+          <p className="text-sm">1 processing run, 2 ready for training.</p>
         </Card>
         <Card>
           <p className="text-sm font-semibold text-black/60">Datasets</p>
@@ -42,11 +42,11 @@ export default function DashboardPage() {
             <span className="text-black/60">2 minutes ago</span>
           </div>
           <div className="flex items-center justify-between border-b border-black/10 pb-3">
-            <span>XGen augmentation 3 completed</span>
+            <span>Dataset variation batch completed</span>
             <span className="text-black/60">15 minutes ago</span>
           </div>
           <div className="flex items-center justify-between">
-            <span>XMimic student distillation queued</span>
+            <span>Training queued</span>
             <span className="text-black/60">1 hour ago</span>
           </div>
         </div>

@@ -89,7 +89,7 @@ export default function GVHMRPage() {
       setSmplxUploadStatus("Uploading SMPL-X model...");
       const status = await uploadGvhmrSmplxModel(smplxFile);
       setSmplxStatus(status);
-      setSmplxUploadStatus("Uploaded. New GVHMR runs will produce a real 3D preview.");
+      setSmplxUploadStatus("Uploaded. New runs will produce a real 3D preview.");
     } catch (err) {
       setSmplxUploadStatus(null);
       setError(err instanceof Error ? err.message : "Failed to upload SMPL-X model");
@@ -116,8 +116,8 @@ export default function GVHMRPage() {
 
       setStatus("Finding project...");
       const projects = await listProjects();
-      const existing = projects.find((p) => p.name === "GVHMR Demos");
-      const project = existing ?? (await createProject("GVHMR Demos", "Pose recovery from monocular phone video"));
+      const existing = projects.find((p) => p.name === "Studio");
+      const project = existing ?? (await createProject("Studio", "Phone video -> 3D motion preview"));
 
       setStatus("Creating demo record...");
       const demo = await createDemo(project.id, "human", "none");
@@ -125,7 +125,7 @@ export default function GVHMRPage() {
       setStatus("Uploading video...");
       await uploadDemoVideo(demo.id, file);
 
-      setStatus("Starting GVHMR...");
+      setStatus("Starting motion recovery...");
       const job = await runXgen(demo.id, {
         requires_gpu: true,
         only_pose: true,
@@ -148,11 +148,11 @@ export default function GVHMRPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-8">
       <section className="space-y-3">
-        <p className="section-eyebrow">GVHMR</p>
+        <p className="section-eyebrow">Motion Recovery</p>
         <h1 className="text-3xl font-semibold text-black">Upload a video and recover 3D motion</h1>
         <p className="text-sm text-black/70">
-          This runs GVHMR pose extraction on the Windows GPU worker and shows a side-by-side preview: original video plus a
-          3D skeleton render.
+          This runs motion recovery on the Windows GPU worker and shows a side-by-side preview: original video plus a 3D
+          skeleton render. (Powered by GVHMR.)
         </p>
       </section>
 
@@ -234,7 +234,7 @@ export default function GVHMRPage() {
           </div>
         </details>
         <Button onClick={handleRun} disabled={!file || poseReady === false || smplxStatus?.exists === false}>
-          Run GVHMR
+          Run motion recovery
         </Button>
         {status ? <p className="text-sm text-emerald-700">{status}</p> : null}
         {error ? <p className="text-sm text-rose-700">{error}</p> : null}

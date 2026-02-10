@@ -122,10 +122,10 @@ export default function NewDemoPage() {
   return (
     <div className="space-y-8">
       <section>
-        <p className="section-eyebrow">Teach A Robot From A Video</p>
+        <p className="section-eyebrow">Studio</p>
         <h1 className="text-3xl font-semibold text-black">Upload one phone video. Get a dataset and a policy.</h1>
         <p className="mt-2 max-w-2xl text-sm text-black/70">
-          Minimal flow: upload, run XGen, then (optionally) train an XMimic policy. Advanced settings are optional.
+          Minimal flow: upload, generate practice data, then (optionally) train a policy. Advanced settings are optional.
         </p>
       </section>
 
@@ -152,8 +152,8 @@ export default function NewDemoPage() {
             />
           </div>
           <p className="text-sm">
-            Pick <strong>Real</strong> to run GVHMR pose extraction and Isaac Lab PPO on the Windows GPU worker, or{" "}
-            <strong>Fast</strong> to run a stubbed pipeline for quick UI validation.
+            Pick <strong>Full</strong> to run motion recovery and training on the Windows GPU worker, or <strong>Quick</strong>{" "}
+            to run a stubbed pipeline for UI validation.
           </p>
           <div className="grid gap-3 md:grid-cols-2">
             <label className="grid gap-2 text-sm font-semibold text-black">
@@ -163,8 +163,8 @@ export default function NewDemoPage() {
                 value={pipeline}
                 onChange={(event) => setPipeline(event.target.value as "fast" | "real")}
               >
-                <option value="real">Real (GVHMR + Isaac Lab PPO, GPU)</option>
-                <option value="fast">Fast (placeholder + synthetic)</option>
+                <option value="real">Full (motion recovery + PPO teacher, GPU)</option>
+                <option value="fast">Quick (placeholder + synthetic)</option>
               </select>
             </label>
             <label className="grid gap-2 text-sm font-semibold text-black">
@@ -186,13 +186,13 @@ export default function NewDemoPage() {
                 checked={gvhmrStaticCam}
                 onChange={(event) => setGvhmrStaticCam(event.target.checked)}
               />
-              Static camera (GVHMR recommended for phone videos)
+              Static camera (recommended for phone videos)
             </label>
           ) : null}
           {pipeline === "real" ? (
             <p className="text-xs text-black/60">
-              GVHMR requires licensed SMPL-X model files on the GPU PC. If pose extraction falls back, open the XGen job
-              logs and follow <code>docs/GVHMR.md</code>.
+              Motion recovery requires a licensed SMPL-X model file on the GPU PC. If it falls back, open the job logs and follow{" "}
+              <code>docs/GVHMR.md</code>.
             </p>
           ) : null}
           <Button onClick={handleRun}>Generate dataset and policy</Button>
