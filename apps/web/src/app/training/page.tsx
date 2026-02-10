@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -19,6 +20,8 @@ export default function TrainingPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const requestedDatasetId = searchParams.get("dataset_id") || "";
 
   useEffect(() => {
     let cancelled = false;
@@ -28,7 +31,7 @@ export default function TrainingPage() {
         const response = await listDatasets();
         if (cancelled) return;
         setDatasets(response);
-        setDatasetId((prev) => prev || response[0]?.id || "");
+        setDatasetId((prev) => prev || requestedDatasetId || response[0]?.id || "");
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Failed to load datasets");
@@ -39,7 +42,7 @@ export default function TrainingPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [requestedDatasetId]);
 
   const selectedDataset = useMemo(
     () => datasets.find((dataset) => dataset.id === datasetId) ?? null,
