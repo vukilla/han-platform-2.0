@@ -221,6 +221,7 @@ export default function JobProgressPage() {
   useEffect(() => {
     let timer: NodeJS.Timeout | null = null;
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const isTerminal = (s: string | null | undefined) => s === "COMPLETED" || s === "FAILED";
     const poll = () => {
       fetch(`${apiUrl}/ops/workers?timeout=1.0`)
         .then((res) => (res.ok ? res.json() : null))
@@ -234,11 +235,13 @@ export default function JobProgressPage() {
         });
     };
     poll();
-    timer = setInterval(poll, 3000);
+    if (!isTerminal(status)) {
+      timer = setInterval(poll, 3000);
+    }
     return () => {
       if (timer) clearInterval(timer);
     };
-  }, []);
+  }, [status]);
 
   const startTraining = useCallback(async (mode: "nep" | "mocap", backend: "synthetic" | "isaaclab_teacher_ppo") => {
     if (!datasetId || !jobIsComplete) return;
