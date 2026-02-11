@@ -1,6 +1,6 @@
 # han-platform
 
-HumanX Data Factory scaffolding: Next.js web app, FastAPI backend, XGen/XMimic services, and local infra.
+Humanoid Network platform scaffolding: Next.js web app, FastAPI backend, XGen/XMimic services, and local infra.
 
 ## Quick start
 1. `docker compose -f infra/docker-compose.yml up --build`
@@ -37,7 +37,7 @@ Legacy Isaac Gym/PhysHOI scripts remain under `scripts/gpu/` but assume Linux an
 
 ## GitHub Notes
 - `.gitignore` excludes `external/`, `tmp/`, `.env`, venvs, node_modules, and large checkpoints.
-- Keep the HumanX PDF local (recommended path: `docs/references/HumanX.pdf`). Do not commit it.
+- Keep the reference paper PDF local (recommended path: `docs/references/paper.pdf`). Do not commit it.
 
 ## Structure
 - `apps/web` Next.js UI

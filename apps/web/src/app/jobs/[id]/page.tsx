@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
@@ -10,7 +10,6 @@ import {
   getDemo,
   getGvhmrSmplxModelStatus,
   getXgenJob,
-  login,
   requeueXgenJob,
   runXmimic,
   uploadGvhmrSmplxModel,
@@ -18,7 +17,7 @@ import {
   GVHMRSmplxModelStatus,
   XGenJobOut,
 } from "@/lib/api";
-import { getToken, setToken } from "@/lib/auth";
+import { clearToken, getToken } from "@/lib/auth";
 
 const DEFAULT_ISAACLAB_NUM_ENVS = 8;
 const DEFAULT_ISAACLAB_UPDATES = 2;
@@ -38,6 +37,7 @@ const fullStages = [
 
 export default function JobProgressPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const jobId = params?.id;
   const [job, setJob] = useState<XGenJobOut | null>(null);
@@ -73,8 +73,9 @@ export default function JobProgressPage() {
 
   async function ensureLoggedIn() {
     if (getToken()) return;
-    const resp = await login("demo@humanx.local", "Demo");
-    setToken(resp.token);
+    clearToken();
+    router.push("/auth");
+    throw new Error("Please sign in with Privy first.");
   }
 
   useEffect(() => {

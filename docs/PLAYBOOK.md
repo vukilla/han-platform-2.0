@@ -1,4 +1,4 @@
-# HumanX Data Factory Build Playbook (Code-First)
+# Humanoid Network Build Playbook (Code-First)
 
 This playbook is a consolidated, end-to-end process to build the HumanX-style data factory with XGen and XMimic. It is designed to be executed by a Codex agent in dependency order, using Linear as the execution driver. Figma is optional.
 

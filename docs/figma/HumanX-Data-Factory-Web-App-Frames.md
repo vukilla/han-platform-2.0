@@ -1,4 +1,4 @@
-# HumanX Data Factory – Web App (Figma Frames)
+# Humanoid Network - Web App (Figma Frames)
 
 ## Frame list (in order)
 1. Landing

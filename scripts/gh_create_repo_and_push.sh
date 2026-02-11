@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 REPO_NAME="${1:-han-platform}" # can also be OWNER/REPO
 VISIBILITY="${2:-private}"         # private|public|internal
-DESCRIPTION="${3:-HumanX Data Factory (XGen + XMimic) platform scaffold}"
+DESCRIPTION="${3:-Humanoid Network (XGen + XMimic) platform scaffold}"
 
 if ! command -v gh >/dev/null 2>&1; then
   echo "gh CLI is required but not installed."

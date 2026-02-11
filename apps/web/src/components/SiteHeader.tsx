@@ -12,7 +12,7 @@ export function SiteHeader() {
   return (
     <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6">
       <Link href="/" className="text-lg font-semibold tracking-tight">
-        HumanX Data Factory
+        Humanoid Network
       </Link>
       <nav className="hidden items-center gap-6 text-sm font-semibold text-black/70 md:flex">
         {nav.map((item) => (

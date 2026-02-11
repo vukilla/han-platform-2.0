@@ -91,6 +91,7 @@ services:
       context: ../apps/web
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_PRIVY_APP_ID: cmkgtr0dy0421ky0cqdrlltjl
     depends_on:
       - api
     ports:

@@ -1,6 +1,6 @@
 # Codex Agent Instructions (han-platform)
 
-This repo is a local-first implementation of the HumanX Data Factory (XGen + XMimic) with a web app + API + job system.
+This repo is a local-first implementation of Humanoid Network (XGen + XMimic) with a web app + API + job system.
 
 ## Primary Goal (GPU PC)
 
@@ -51,4 +51,3 @@ scripts/run_end_to_end_cpu.sh <video.mp4> <smplx_model_dir> <output_dir>
 - GPU PC setup details: `docs/GPU_PC_SETUP.md`
 - Paper reconciliation status: `docs/HUMANX_PAPER_RECONCILIATION.md`
 - Table IV mapping (obs + reward parity): `docs/HUMANX_TABLE_IV_MAPPING.md`
-

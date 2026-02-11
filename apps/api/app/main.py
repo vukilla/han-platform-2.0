@@ -6,7 +6,7 @@ from app.core.config import get_settings
 from app.core.storage import ensure_bucket_exists
 from app.middleware import SimpleRateLimitMiddleware
 
-app = FastAPI(title="HumanX Data Factory API")
+app = FastAPI(title="Humanoid Network API")
 app.add_middleware(SimpleRateLimitMiddleware)
 
 settings = get_settings()

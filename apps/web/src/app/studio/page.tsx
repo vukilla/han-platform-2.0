@@ -10,14 +10,13 @@ import {
   createDemo,
   createProject,
   getGvhmrSmplxModelStatus,
-  login,
   listProjects,
   runXgen,
   uploadDemoVideo,
   uploadGvhmrSmplxModel,
   GVHMRSmplxModelStatus,
 } from "@/lib/api";
-import { getToken, setToken } from "@/lib/auth";
+import { clearToken, getToken } from "@/lib/auth";
 
 export default function StudioPage() {
   const router = useRouter();
@@ -58,8 +57,9 @@ export default function StudioPage() {
 
   async function ensureLoggedIn() {
     if (getToken()) return;
-    const resp = await login("demo@humanx.local", "Demo");
-    setToken(resp.token);
+    clearToken();
+    router.push("/auth");
+    throw new Error("Please sign in with Privy first.");
   }
 
   useEffect(() => {

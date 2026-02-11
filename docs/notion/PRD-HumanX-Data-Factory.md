@@ -1,4 +1,4 @@
-# PRD – HumanX Data Factory
+# PRD - Humanoid Network
 
 ## Problem
 Physical interaction data is scarce, expensive, and fragmented. Existing datasets are difficult to unify across robots and tasks, which blocks scalable policy training.
