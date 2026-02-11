@@ -282,7 +282,14 @@ export default function JobProgressPage() {
     job?.params_json && typeof job.params_json.pose_preview_global_side_mp4_uri === "string"
       ? (job.params_json.pose_preview_global_side_mp4_uri as string)
       : null;
+  const poseInputNorm =
+    job?.params_json && typeof job.params_json.pose_input_norm_mp4_uri === "string"
+      ? (job.params_json.pose_input_norm_mp4_uri as string)
+      : null;
   const demoVideo = demo?.video_uri ?? null;
+  // Prefer the GVHMR-normalized input for the "Original" pane so timebases match the preview videos,
+  // reducing drift and avoiding playback flicker from frequent seeks.
+  const originalVideoSrc = onlyPose ? (poseInputNorm ?? demoVideo) : demoVideo;
   const previewMessage = jobIsComplete
     ? poseOk === false
       ? "Motion recovery fell back to a placeholder pose (no preview video). See the pose log below."
@@ -396,19 +403,6 @@ export default function JobProgressPage() {
     syncRate(a, b);
     syncLockRef.current = false;
   }, [syncRate]);
-
-  const handleOriginalTimeUpdate = useCallback(() => {
-    const a = originalVideoRef.current;
-    const b = previewVideoRef.current;
-    if (!a || !b) return;
-    if (syncLockRef.current) return;
-    // Small drift correction while playing.
-    if (!a.paused && !b.paused) {
-      syncLockRef.current = true;
-      syncTime(a, b, { force: false });
-      syncLockRef.current = false;
-    }
-  }, [syncTime]);
 
   const handlePreviewLoadedMetadata = useCallback(() => {
     const a = originalVideoRef.current;
@@ -577,18 +571,17 @@ export default function JobProgressPage() {
           <div className="grid gap-6 lg:grid-cols-2">
             <div className="space-y-2">
               <p className="text-sm font-semibold text-black/60">Original</p>
-              {demoVideo ? (
+              {originalVideoSrc ? (
                 <video
                   ref={originalVideoRef}
                   className="w-full rounded-2xl border border-black/10 bg-black"
                   controls
                   playsInline
-                  src={demoVideo}
+                  src={originalVideoSrc}
                   onPlay={handleOriginalPlay}
                   onPause={handleOriginalPause}
                   onSeeking={handleOriginalSeeking}
                   onRateChange={handleOriginalRateChange}
-                  onTimeUpdate={handleOriginalTimeUpdate}
                 />
               ) : (
                 <p className="text-sm text-black/60">Waiting for upload...</p>
@@ -624,9 +617,14 @@ export default function JobProgressPage() {
                   onSeeking={handlePreviewSeeking}
                   onRateChange={handlePreviewRateChange}
                 />
-              ) : demoVideo ? (
+              ) : originalVideoSrc ? (
                 <div className="relative">
-                  <video className="w-full rounded-2xl border border-black/10 bg-black" controls playsInline src={demoVideo} />
+                  <video
+                    className="w-full rounded-2xl border border-black/10 bg-black"
+                    controls
+                    playsInline
+                    src={originalVideoSrc}
+                  />
                   <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/40 p-4">
                     <p className="text-sm font-semibold text-white">{previewMessage}</p>
                   </div>
