@@ -73,10 +73,18 @@ index 6ef3897..55c80e8 100644
  try:
      from hmr4d.utils.preproc.slam import SLAMModel
 diff --git a/hmr4d/utils/preproc/tracker.py b/hmr4d/utils/preproc/tracker.py
-index b093ed4..2741e83 100644
+index b093ed4..7edb6d1 100644
 --- a/hmr4d/utils/preproc/tracker.py
 +++ b/hmr4d/utils/preproc/tracker.py
-@@ -16,9 +16,41 @@ from hmr4d.utils.video_io_utils import get_video_lwh
+@@ -1,6 +1,7 @@
+ from ultralytics import YOLO
+ from hmr4d import PROJ_ROOT
+ 
++import os
+ import torch
+ import numpy as np
+ from tqdm import tqdm
+@@ -16,11 +17,82 @@ from hmr4d.utils.video_io_utils import get_video_lwh
  from hmr4d.utils.net_utils import moving_average_smooth
  
  
@@ -117,8 +125,49 @@ index b093ed4..2741e83 100644
 +        _allowlist_ultralytics_safe_globals()
          self.yolo = YOLO(PROJ_ROOT / "inputs/checkpoints/yolo/yolov8x.pt")
  
++    @staticmethod
++    def _env_float(name: str, default: float) -> float:
++        try:
++            return float(os.environ.get(name, str(default)))
++        except Exception:
++            return default
++
++    @staticmethod
++    def _env_int(name: str, default: int) -> int:
++        try:
++            return int(os.environ.get(name, str(default)))
++        except Exception:
++            return default
++
++    @staticmethod
++    def _center_xy(box_xyxy: np.ndarray) -> np.ndarray:
++        return np.asarray([(box_xyxy[0] + box_xyxy[2]) * 0.5, (box_xyxy[1] + box_xyxy[3]) * 0.5], dtype=np.float32)
++
++    @staticmethod
++    def _area(box_xyxy: np.ndarray) -> float:
++        wh = np.maximum(box_xyxy[2:] - box_xyxy[:2], 1.0)
++        return float(wh[0] * wh[1])
++
++    @staticmethod
++    def _iou_xyxy(box_a: np.ndarray, box_b: np.ndarray) -> float:
++        x1 = max(float(box_a[0]), float(box_b[0]))
++        y1 = max(float(box_a[1]), float(box_b[1]))
++        x2 = min(float(box_a[2]), float(box_b[2]))
++        y2 = min(float(box_a[3]), float(box_b[3]))
++        inter_w = max(0.0, x2 - x1)
++        inter_h = max(0.0, y2 - y1)
++        inter = inter_w * inter_h
++        if inter <= 0.0:
++            return 0.0
++        area_a = Tracker._area(box_a)
++        area_b = Tracker._area(box_b)
++        union = max(area_a + area_b - inter, 1e-6)
++        return float(inter / union)
++
      def track(self, video_path):
-@@ -30,14 +62,19 @@ class Tracker:
+         track_history = []
+         cfg = {
+@@ -30,16 +102,96 @@ class Tracker:
              "verbose": False,
              "stream": True,
          }
@@ -128,23 +177,114 @@ index b093ed4..2741e83 100644
 -        for result in tqdm(results, total=get_video_lwh(video_path)[0], desc="YoloV8 Tracking"):
 -            if result.boxes.id is not None:
 -                track_ids = result.boxes.id.int().cpu().tolist()  # (N)
+-                bbx_xyxy = result.boxes.xyxy.cpu().numpy()  # (N, 4)
+-                result_frame = [{"id": track_ids[i], "bbx_xyxy": bbx_xyxy[i]} for i in range(len(track_ids))]
+-            else:
 +        # NOTE: Avoid Ultralytics `.track()` on Windows because it pulls in tracking
 +        # dependencies (e.g. `lap/lapx`) and can attempt runtime `pip install`.
 +        # For GVHMR preprocessing we only need a single-person bbox per frame, so
 +        # `.predict()` is sufficient and much more robust.
 +        results = self.yolo.predict(video_path, **cfg)
++        _, width, height = get_video_lwh(video_path)
++        frame_diag = float(np.hypot(width, height))
++        image_area = float(max(width * height, 1))
++
++        # Subject-lock tuning:
++        # - Warm start prefers detections near image center + larger area.
++        # - Online step prefers continuity from previous bbox and only falls back to
++        #   center/size when tracking gets lost.
++        init_center_w = self._env_float("GVHMR_TRACK_INIT_CENTER_W", 0.45)
++        init_area_w = self._env_float("GVHMR_TRACK_INIT_AREA_W", 0.45)
++        init_conf_w = self._env_float("GVHMR_TRACK_INIT_CONF_W", 0.10)
++        step_iou_w = self._env_float("GVHMR_TRACK_STEP_IOU_W", 0.55)
++        step_motion_w = self._env_float("GVHMR_TRACK_STEP_MOTION_W", 0.15)
++        step_area_w = self._env_float("GVHMR_TRACK_STEP_AREA_W", 0.15)
++        step_anchor_w = self._env_float("GVHMR_TRACK_STEP_ANCHOR_W", 0.10)
++        step_conf_w = self._env_float("GVHMR_TRACK_STEP_CONF_W", 0.05)
++        max_center_jump_norm = self._env_float("GVHMR_TRACK_MAX_JUMP_NORM", 0.20)
++        max_jump_boxdiag = self._env_float("GVHMR_TRACK_MAX_JUMP_BOXSIZE", 2.0)
++        reacquire_after = max(1, self._env_int("GVHMR_TRACK_REACQUIRE_AFTER", 12))
++        anchor_alpha = self._env_float("GVHMR_TRACK_ANCHOR_ALPHA", 0.12)
++
++        selected_box: np.ndarray | None = None
++        anchor_center = np.asarray([width * 0.5, height * 0.5], dtype=np.float32)
++        lost_frames = 0
++
 +        for result in tqdm(results, total=get_video_lwh(video_path)[0], desc="YoloV8 Detect"):
-+            if result.boxes is not None and result.boxes.xyxy is not None and result.boxes.xyxy.shape[0] > 0:
-                 bbx_xyxy = result.boxes.xyxy.cpu().numpy()  # (N, 4)
--                result_frame = [{"id": track_ids[i], "bbx_xyxy": bbx_xyxy[i]} for i in range(len(track_ids))]
-+                best_idx = 0
-+                if getattr(result.boxes, "conf", None) is not None and result.boxes.conf.shape[0] == bbx_xyxy.shape[0]:
-+                    best_idx = int(result.boxes.conf.argmax().item())
-+                # Single tracked ID (person=0) for downstream code.
-+                result_frame = [{"id": 0, "bbx_xyxy": bbx_xyxy[best_idx]}]
-             else:
++            if result.boxes is None or result.boxes.xyxy is None or result.boxes.xyxy.shape[0] == 0:
++                lost_frames += 1
++                if lost_frames >= reacquire_after:
++                    selected_box = None
                  result_frame = []
++                track_history.append(result_frame)
++                continue
++
++            bbx_xyxy = result.boxes.xyxy.cpu().numpy().astype(np.float32)  # (N, 4)
++            if getattr(result.boxes, "conf", None) is not None and result.boxes.conf.shape[0] == bbx_xyxy.shape[0]:
++                conf = result.boxes.conf.cpu().numpy().astype(np.float32)
++            else:
++                conf = np.ones((bbx_xyxy.shape[0],), dtype=np.float32)
++
++            centers = 0.5 * (bbx_xyxy[:, :2] + bbx_xyxy[:, 2:])
++            wh = np.maximum(bbx_xyxy[:, 2:] - bbx_xyxy[:, :2], 1.0)
++            areas = wh[:, 0] * wh[:, 1]
++            center_dist_to_anchor = np.linalg.norm(centers - anchor_center[None, :], axis=1)
++            anchor_score = np.exp(-center_dist_to_anchor / (0.35 * frame_diag + 1e-6))
++
++            if selected_box is None:
++                area_score = np.sqrt(np.clip(areas / image_area, 0.0, 1.0))
++                init_score = init_center_w * anchor_score + init_area_w * area_score + init_conf_w * conf
++                best_idx = int(np.argmax(init_score))
++            else:
++                prev_center = self._center_xy(selected_box)
++                prev_area = self._area(selected_box)
++                prev_diag = float(np.linalg.norm(np.maximum(selected_box[2:] - selected_box[:2], 1.0)))
++
++                center_dist_to_prev = np.linalg.norm(centers - prev_center[None, :], axis=1)
++                motion_score = np.exp(-center_dist_to_prev / (max(prev_diag * 2.0, 1.0)))
++                area_ratio = np.minimum(areas, prev_area) / np.maximum(areas, prev_area)
++                ious = np.asarray([self._iou_xyxy(selected_box, bb) for bb in bbx_xyxy], dtype=np.float32)
++                step_score = (
++                    step_iou_w * ious
++                    + step_motion_w * motion_score
++                    + step_area_w * area_ratio
++                    + step_anchor_w * anchor_score
++                    + step_conf_w * conf
++                )
++                best_idx = int(np.argmax(step_score))
++
++                jump_norm = float(center_dist_to_prev[best_idx] / (frame_diag + 1e-6))
++                jump_boxdiag = float(center_dist_to_prev[best_idx] / (max(prev_diag, 1.0)))
++                if ious[best_idx] < 0.02 and (jump_norm > max_center_jump_norm or jump_boxdiag > max_jump_boxdiag):
++                    # Treat implausible jumps as temporary miss to prevent foreground/background identity swaps.
++                    lost_frames += 1
++                    if lost_frames >= reacquire_after:
++                        selected_box = None
++                    result_frame = []
++                    track_history.append(result_frame)
++                    continue
++
++            selected_box = bbx_xyxy[best_idx].copy()
++            lost_frames = 0
++            selected_center = centers[best_idx]
++            anchor_center = (1.0 - anchor_alpha) * anchor_center + anchor_alpha * selected_center
++            # Single tracked ID (person=0) for downstream code.
++            result_frame = [{"id": 0, "bbx_xyxy": selected_box}]
              track_history.append(result_frame)
+ 
+         return track_history
+@@ -78,6 +230,11 @@ class Tracker:
+ 
+         # parse track_history & use top1 track
+         id_to_frame_ids, id_to_bbx_xyxys, id_sorted = self.sort_track_length(track_history, video_path)
++        if len(id_sorted) == 0:
++            raise RuntimeError(
++                "GVHMR tracker could not find any person detections in this video. "
++                "Try a clip where the subject is larger/clearer, or reduce camera cuts/occlusions."
++            )
+         track_id = id_sorted[0]
+         frame_ids = torch.tensor(id_to_frame_ids[track_id])  # (N,)
+         bbx_xyxys = torch.tensor(id_to_bbx_xyxys[track_id])  # (N, 4)
 diff --git a/hmr4d/utils/vis/renderer.py b/hmr4d/utils/vis/renderer.py
 index f4d6232..5df0e57 100644
 --- a/hmr4d/utils/vis/renderer.py

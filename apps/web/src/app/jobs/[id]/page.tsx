@@ -67,6 +67,7 @@ export default function JobProgressPage() {
   const resumeAfterPreviewReadyRef = useRef(false);
   const previewBlobUrlsRef = useRef<Record<string, string>>({});
   const [previewBlobUrls, setPreviewBlobUrls] = useState<Record<string, string>>({});
+  const [previewAspectRatio, setPreviewAspectRatio] = useState<number>(16 / 9);
 
   const onlyPose = Boolean(job?.params_json?.only_pose);
 
@@ -454,6 +455,20 @@ export default function JobProgressPage() {
     }
   }, []);
 
+  const updatePreviewAspectRatio = useCallback((video: HTMLVideoElement | null) => {
+    if (!video) return;
+    const w = Number(video.videoWidth || 0);
+    const h = Number(video.videoHeight || 0);
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return;
+    const ratio = w / h;
+    if (ratio < 0.25 || ratio > 4.0) return;
+    setPreviewAspectRatio((prev) => (Math.abs(prev - ratio) > 0.01 ? ratio : prev));
+  }, []);
+
+  const handleOriginalLoadedMetadata = useCallback(() => {
+    updatePreviewAspectRatio(originalVideoRef.current);
+  }, [updatePreviewAspectRatio]);
+
   const handleOriginalPlay = useCallback(() => {
     const a = originalVideoRef.current;
     const b = previewVideoRef.current;
@@ -501,6 +516,7 @@ export default function JobProgressPage() {
   const handlePreviewLoadedMetadata = useCallback(() => {
     const a = originalVideoRef.current;
     const b = previewVideoRef.current;
+    updatePreviewAspectRatio(a ?? b);
     if (!a || !b) return;
     syncLockRef.current = true;
     syncRate(a, b);
@@ -512,7 +528,7 @@ export default function JobProgressPage() {
       b.play().catch(() => null);
     }
     syncLockRef.current = false;
-  }, [syncRate, syncTime]);
+  }, [syncRate, syncTime, updatePreviewAspectRatio]);
 
   const handlePreviewSelectChange = useCallback((nextPreviewId: string) => {
     const a = originalVideoRef.current;
@@ -636,18 +652,24 @@ export default function JobProgressPage() {
             <div className="space-y-2">
               <p className="text-sm font-semibold text-black/60">Original</p>
               {originalVideoSrc ? (
-                <video
-                  ref={originalVideoRef}
-                  className="w-full rounded-2xl border border-black/10 bg-black"
-                  controls
-                  playsInline
-                  preload="auto"
-                  src={originalVideoSrc}
-                  onPlay={handleOriginalPlay}
-                  onPause={handleOriginalPause}
-                  onSeeked={handleOriginalSeeked}
-                  onRateChange={handleOriginalRateChange}
-                />
+                <div
+                  className="relative w-full overflow-hidden rounded-2xl border border-black/10 bg-black"
+                  style={{ aspectRatio: previewAspectRatio }}
+                >
+                  <video
+                    ref={originalVideoRef}
+                    className="absolute inset-0 h-full w-full object-contain"
+                    controls
+                    playsInline
+                    preload="auto"
+                    src={originalVideoSrc}
+                    onLoadedMetadata={handleOriginalLoadedMetadata}
+                    onPlay={handleOriginalPlay}
+                    onPause={handleOriginalPause}
+                    onSeeked={handleOriginalSeeked}
+                    onRateChange={handleOriginalRateChange}
+                  />
+                </div>
               ) : (
                 <p className="text-sm text-black/60">Waiting for upload...</p>
               )}
@@ -670,29 +692,40 @@ export default function JobProgressPage() {
                 ) : null}
               </div>
               {selectedPreviewSrc ? (
-                <video
-                  ref={previewVideoRef}
-                  className="w-full rounded-2xl border border-black/10 bg-black"
-                  playsInline
-                  muted
-                  preload="auto"
-                  src={selectedPreviewSrcResolved}
-                  onLoadedMetadata={handlePreviewLoadedMetadata}
-                />
-              ) : originalVideoSrc ? (
-                <div className="relative">
+                <div
+                  className="relative w-full overflow-hidden rounded-2xl border border-black/10 bg-black"
+                  style={{ aspectRatio: previewAspectRatio }}
+                >
                   <video
-                    className="w-full rounded-2xl border border-black/10 bg-black"
+                    ref={previewVideoRef}
+                    className="absolute inset-0 h-full w-full object-contain"
+                    playsInline
+                    muted
+                    preload="auto"
+                    src={selectedPreviewSrcResolved}
+                    onLoadedMetadata={handlePreviewLoadedMetadata}
+                  />
+                </div>
+              ) : originalVideoSrc ? (
+                <div
+                  className="relative w-full overflow-hidden rounded-2xl border border-black/10 bg-black"
+                  style={{ aspectRatio: previewAspectRatio }}
+                >
+                  <video
+                    className="absolute inset-0 h-full w-full object-contain"
                     controls
                     playsInline
                     src={originalVideoSrc}
                   />
-                  <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/40 p-4">
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 p-4">
                     <p className="text-sm font-semibold text-white">{previewMessage}</p>
                   </div>
                 </div>
               ) : (
-                <div className="flex aspect-video items-center justify-center rounded-2xl border border-black/10 bg-black/[0.04] p-4">
+                <div
+                  className="flex w-full items-center justify-center rounded-2xl border border-black/10 bg-black/[0.04] p-4"
+                  style={{ aspectRatio: previewAspectRatio }}
+                >
                   <p className="text-sm text-black/60">{previewMessage}</p>
                 </div>
               )}
