@@ -1,7 +1,7 @@
 # Notion Page Drafts
 These Markdown files mirror the requested Notion pages and can be pasted into Notion if API access is not available.
 
-- PRD-HumanX-Data-Factory.md
+- PRD-Humanoid-Network-Data-Factory.md
 - User-Flows.md
 - Data-Schema.md
 - API-Contract-OpenAPI.yaml

@@ -21,8 +21,6 @@ export default function GVHMRPage() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
-  const [gvhmrStaticCam, setGvhmrStaticCam] = useState(true);
-  const [quickTrim, setQuickTrim] = useState(true);
   const [poseReady, setPoseReady] = useState<boolean | null>(null);
   const [smplxStatus, setSmplxStatus] = useState<GVHMRSmplxModelStatus | null>(null);
   const [smplxFile, setSmplxFile] = useState<File | null>(null);
@@ -130,8 +128,7 @@ export default function GVHMRPage() {
         requires_gpu: true,
         only_pose: true,
         pose_estimator: "gvhmr",
-        gvhmr_static_cam: Boolean(gvhmrStaticCam),
-        gvhmr_max_seconds: quickTrim ? 12 : undefined,
+        gvhmr_static_cam: true,
         // On the GVHMR-only page, require the licensed SMPL-X model file and fail fast if it's missing.
         // The job page provides an inline uploader + requeue to recover from this.
         fail_on_pose_error: true,
@@ -220,19 +217,6 @@ export default function GVHMRPage() {
             <video className="w-full rounded-2xl border border-black/10 bg-black" controls playsInline src={localPreviewUrl} />
           </div>
         ) : null}
-        <details className="rounded-2xl border border-black/10 bg-black/[0.02] p-4">
-          <summary className="cursor-pointer text-sm font-semibold text-black">Advanced options</summary>
-          <div className="mt-3 space-y-3">
-            <label className="flex items-center gap-2 text-sm text-black/70">
-              <input type="checkbox" checked={gvhmrStaticCam} onChange={(event) => setGvhmrStaticCam(event.target.checked)} />
-              Static camera (recommended)
-            </label>
-            <label className="flex items-center gap-2 text-sm text-black/70">
-              <input type="checkbox" checked={quickTrim} onChange={(event) => setQuickTrim(event.target.checked)} />
-              Quick preview (trim to first 12 seconds)
-            </label>
-          </div>
-        </details>
         <Button onClick={handleRun} disabled={!file || poseReady === false || smplxStatus?.exists === false}>
           Run motion recovery
         </Button>

@@ -3,12 +3,12 @@ import unittest
 
 import numpy as np
 
-from xmimic.rewards.unified import HumanXRewardConfig, RewardTerm, compute_reward_terms
+from xmimic.rewards.unified import HumanoidNetworkRewardConfig, RewardTerm, compute_reward_terms
 
 
 class TestUnifiedRewards(unittest.TestCase):
     def test_contact_reward_weighted_abs(self):
-        cfg = HumanXRewardConfig(
+        cfg = HumanoidNetworkRewardConfig(
             contact=RewardTerm(gamma=1.0, lambda_=1.0),
             contact_weights=[1.0, 2.0, 3.0],
             regularization=0.0,
@@ -21,7 +21,7 @@ class TestUnifiedRewards(unittest.TestCase):
         self.assertAlmostEqual(terms["contact"], expected, places=6)
 
     def test_contact_weights_must_match_dim(self):
-        cfg = HumanXRewardConfig(
+        cfg = HumanoidNetworkRewardConfig(
             contact=RewardTerm(gamma=1.0, lambda_=1.0),
             contact_weights=[1.0, 2.0],
             regularization=0.0,
@@ -31,7 +31,7 @@ class TestUnifiedRewards(unittest.TestCase):
             compute_reward_terms(obs={"contact": scg}, targets={"contact": scg}, config=cfg)
 
     def test_regularization_action_rate(self):
-        cfg = HumanXRewardConfig(
+        cfg = HumanoidNetworkRewardConfig(
             regularization=0.5,
             reg_terms={"action_l2": 2.0, "action_rate": 3.0},
         )
@@ -45,7 +45,7 @@ class TestUnifiedRewards(unittest.TestCase):
         self.assertAlmostEqual(terms["regularization"], -2.5, places=6)
 
     def test_relative_pos_uses_mean_squared_l2_norm(self):
-        cfg = HumanXRewardConfig(relative_pos=RewardTerm(gamma=1.0, lambda_=1.0), regularization=0.0)
+        cfg = HumanoidNetworkRewardConfig(relative_pos=RewardTerm(gamma=1.0, lambda_=1.0), regularization=0.0)
         a = np.array([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=np.float32)
         b = np.zeros_like(a)
         # squared norms: [1, 4], mean = 2.5
@@ -54,7 +54,7 @@ class TestUnifiedRewards(unittest.TestCase):
         self.assertAlmostEqual(terms["relative_pos"], expected, places=6)
 
     def test_relative_pos_derived_from_body_pos_and_object_pos(self):
-        cfg = HumanXRewardConfig(relative_pos=RewardTerm(gamma=1.0, lambda_=1.0), regularization=0.0)
+        cfg = HumanoidNetworkRewardConfig(relative_pos=RewardTerm(gamma=1.0, lambda_=1.0), regularization=0.0)
         body = np.array([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=np.float32)
         obj = np.array([0.0, 0.0, 0.0], dtype=np.float32)
         # relative vectors are body - obj, so identical to `body` here.
@@ -67,7 +67,7 @@ class TestUnifiedRewards(unittest.TestCase):
         self.assertAlmostEqual(terms["relative_pos"], expected, places=6)
 
     def test_relative_pos_derived_from_key_body_pos_and_object_pos(self):
-        cfg = HumanXRewardConfig(relative_pos=RewardTerm(gamma=1.0, lambda_=1.0), regularization=0.0)
+        cfg = HumanoidNetworkRewardConfig(relative_pos=RewardTerm(gamma=1.0, lambda_=1.0), regularization=0.0)
         key_body = np.array([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=np.float32)
         obj = np.array([0.0, 0.0, 0.0], dtype=np.float32)
         expected = math.exp(-2.5)
@@ -79,7 +79,7 @@ class TestUnifiedRewards(unittest.TestCase):
         self.assertAlmostEqual(terms["relative_pos"], expected, places=6)
 
     def test_relative_pos_prefers_key_body_pos_over_body_pos_when_both_present(self):
-        cfg = HumanXRewardConfig(relative_pos=RewardTerm(gamma=1.0, lambda_=1.0), regularization=0.0)
+        cfg = HumanoidNetworkRewardConfig(relative_pos=RewardTerm(gamma=1.0, lambda_=1.0), regularization=0.0)
         obj = np.array([0.0, 0.0, 0.0], dtype=np.float32)
         key_body = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)  # squared norm=1
         body = np.array([[10.0, 0.0, 0.0]], dtype=np.float32)  # squared norm=100
@@ -92,7 +92,7 @@ class TestUnifiedRewards(unittest.TestCase):
         self.assertAlmostEqual(terms["relative_pos"], math.exp(-1.0), places=6)
 
     def test_relative_pos_derived_time_series_key_body_pos(self):
-        cfg = HumanXRewardConfig(relative_pos=RewardTerm(gamma=1.0, lambda_=1.0), regularization=0.0)
+        cfg = HumanoidNetworkRewardConfig(relative_pos=RewardTerm(gamma=1.0, lambda_=1.0), regularization=0.0)
         # key_body_pos: (T, K, 3), object_pos: (T, 3)
         key_body = np.array(
             [
@@ -112,7 +112,7 @@ class TestUnifiedRewards(unittest.TestCase):
         self.assertAlmostEqual(terms["relative_pos"], expected, places=6)
 
     def test_contact_reward_weighted_abs_time_series(self):
-        cfg = HumanXRewardConfig(
+        cfg = HumanoidNetworkRewardConfig(
             contact=RewardTerm(gamma=1.0, lambda_=1.0),
             contact_weights=[1.0, 2.0, 3.0],
             regularization=0.0,
@@ -125,7 +125,7 @@ class TestUnifiedRewards(unittest.TestCase):
         self.assertAlmostEqual(terms["contact"], expected, places=6)
 
     def test_regularization_additional_table_iv_terms(self):
-        cfg = HumanXRewardConfig(
+        cfg = HumanoidNetworkRewardConfig(
             regularization=0.5,
             reg_terms={"feet_orientation": 2.0, "feet_slippage": 3.0, "dof_limit": 4.0, "torque_limit": 5.0},
         )
@@ -141,7 +141,7 @@ class TestUnifiedRewards(unittest.TestCase):
         self.assertAlmostEqual(terms["regularization"], -5.0, places=6)
 
     def test_regularization_torque_waist_and_termination(self):
-        cfg = HumanXRewardConfig(
+        cfg = HumanoidNetworkRewardConfig(
             regularization=0.5,
             reg_terms={"torque": 2.0, "waist_dof": 3.0, "termination": 4.0},
         )

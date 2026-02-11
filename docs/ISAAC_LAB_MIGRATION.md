@@ -18,6 +18,6 @@ Given the current constraint (Windows GPU PC without WSL/virtualization), treat 
 
 Plan:
 1. Bring up Isaac Sim + Isaac Lab on Windows and prove we can run a headless sim + a trivial task.
-2. Add an adapter layer in `services/xmimic` that maps Isaac Lab env signals into the HumanX Table IV observation schema.
+2. Add an adapter layer in `services/xmimic` that maps Isaac Lab env signals into the Humanoid Network Table IV observation schema.
 3. Port the first end-to-end task (Cargo Pickup) into Isaac Lab assets/configs.
 4. Keep PhysHOI/Isaac Gym as optional reference material only (Linux-only), not as a dependency for the main platform.

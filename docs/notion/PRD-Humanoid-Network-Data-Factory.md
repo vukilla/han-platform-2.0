@@ -4,7 +4,7 @@
 Physical interaction data is scarce, expensive, and fragmented. Existing datasets are difficult to unify across robots and tasks, which blocks scalable policy training.
 
 ## Approach
-Use HumanX-style compilation to turn monocular human videos into standardized, physically plausible humanoid–object interaction trajectories (XGen). Augment those trajectories to expand coverage and use a unified imitation reward in a teacher–student PPO pipeline (XMimic) to avoid per-task reward engineering.
+Use Humanoid Network-style compilation to turn monocular human videos into standardized, physically plausible humanoid–object interaction trajectories (XGen). Augment those trajectories to expand coverage and use a unified imitation reward in a teacher–student PPO pipeline (XMimic) to avoid per-task reward engineering.
 
 ## MVP Scope
 - Video upload → annotation → XGen dataset → preview → optional XMimic training → eval report → export

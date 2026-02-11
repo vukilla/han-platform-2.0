@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
@@ -22,8 +21,6 @@ export default function StudioPage() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
-  const [gvhmrStaticCam, setGvhmrStaticCam] = useState(true);
-  const [quickTrim, setQuickTrim] = useState(true);
   const [poseReady, setPoseReady] = useState<boolean | null>(null);
   const [smplxStatus, setSmplxStatus] = useState<GVHMRSmplxModelStatus | null>(null);
   const [smplxFile, setSmplxFile] = useState<File | null>(null);
@@ -132,8 +129,7 @@ export default function StudioPage() {
         requires_gpu: true,
         only_pose: true,
         pose_estimator: "gvhmr",
-        gvhmr_static_cam: Boolean(gvhmrStaticCam),
-        gvhmr_max_seconds: quickTrim ? 12 : undefined,
+        gvhmr_static_cam: true,
         fail_on_pose_error: true,
       });
 
@@ -225,16 +221,6 @@ export default function StudioPage() {
 
       <Card className="space-y-4">
         <h2 className="text-xl font-semibold text-black">2. Run</h2>
-        <div className="flex flex-wrap items-center gap-6 text-sm text-black/70">
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={gvhmrStaticCam} onChange={(e) => setGvhmrStaticCam(e.target.checked)} />
-            Static camera
-          </label>
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={quickTrim} onChange={(e) => setQuickTrim(e.target.checked)} />
-            Quick trim (first 12s)
-          </label>
-        </div>
         <div className="flex flex-wrap items-center gap-3">
           <Button onClick={handleRun} disabled={!file}>
             Run motion recovery
@@ -246,13 +232,6 @@ export default function StudioPage() {
           You will be taken to a progress page showing the original video and the 3D preview side-by-side.
         </p>
       </Card>
-
-      <p className="text-xs text-black/50">
-        Want the full dataset/training pipeline? Use the advanced page:{" "}
-        <Link href="/demos/new" className="font-semibold text-black underline">
-          /demos/new
-        </Link>
-      </p>
     </div>
   );
 }

@@ -33,7 +33,7 @@ PYTHONPATH=services/xgen python services/xgen/scripts/smplx_resample.py \
 
 ## Orchestration Script
 ```
-./scripts/run_end_to_end_cpu.sh /path/video.mp4 /path/smplx/models /tmp/humanx_out
+./scripts/run_end_to_end_cpu.sh /path/video.mp4 /path/smplx/models /tmp/humanoid_network_out
 ```
 Outputs:
 - `<video_stem>_gvhmr_smplx.npz`

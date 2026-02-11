@@ -1,9 +1,9 @@
-# HumanX Paper Reconciliation (Han Platform 2.0)
+# Humanoid Network Paper Reconciliation (Han Platform)
 
 Source of truth:
-- HumanX paper PDF (keep local, do not commit). Recommended path: `docs/references/HumanX.pdf`
+- Humanoid Network reference paper PDF (keep local, do not commit). Recommended path: `docs/references/paper.pdf`
 
-This document maps the HumanX paper components (XGen + XMimic + deployment) to concrete code in this repo, and flags what is:
+This document maps the Humanoid Network reference paper components (XGen + XMimic + deployment) to concrete code in this repo, and flags what is:
 - OK: implemented in code and exercised by at least a smoke test or runnable script
 - PARTIAL: implemented as scaffolding or an approximation; needs correctness work to match the paper
 - GPU-BLOCKED: implemented in code, but requires GPU PC deps (Windows-native Isaac Sim / Isaac Lab, plus GVHMR runtime) to run end-to-end
@@ -114,11 +114,11 @@ PhysHOI baseline inference (GPU PC):
 
 - PPO actor-critic scaffold + BC hook (PARTIAL)
   - Paper-faithful imitation PPO lives under `services/xmimic/xmimic/train/` and is still being wired to a full humanoid env.
-  - A *real Isaac Lab PPO baseline* (task reward, not HumanX imitation reward) exists for GPU validation and checkpoint export:
+  - A *real Isaac Lab PPO baseline* (task reward, not Humanoid Network imitation reward) exists for GPU validation and checkpoint export:
     - `apps/api/app/gpu/isaaclab_teacher_ppo.py`
 - Unified reward terms (PARTIAL; closer to equation-level parity but env wiring is still pending)
   - `services/xmimic/xmimic/rewards/unified.py`
-  - `services/xmimic/configs/humanx_reward.yaml`
+  - `services/xmimic/configs/humanoid_network_reward.yaml`
   - Eq (12) weighted contact mismatch support.
   - Relative motion vectors can be derived from `body_pos` + `object_pos` (paper Eq. 10 helper).
   - Table IV reg terms support added: feet orientation/slippage, DoF/torque limit penalties.
@@ -137,9 +137,9 @@ PhysHOI baseline inference (GPU PC):
 - NEP / MoCap observation builders + dropout (PARTIAL; Table IV schema now enforced, env still needs to emit full signals)
   - `services/xmimic/xmimic/obs.py`
   - `services/xmimic/xmimic/obs_pipeline.py`
-  - Helper schemas: `humanx_teacher_obs_config(...)`, `humanx_student_obs_config(...)`
+  - Helper schemas: `humanoid_network_teacher_obs_config(...)`, `humanoid_network_student_obs_config(...)`
   - Added support for distinct `history_fields` (Table IV style: current terms + history terms subset).
-  - Mapping doc + schema tests: `docs/HUMANX_TABLE_IV_MAPPING.md`, `services/xmimic/tests/test_obs_pipeline.py`
+  - Mapping doc + schema tests: `docs/HUMANOID_NETWORK_TABLE_IV_MAPPING.md`, `services/xmimic/tests/test_obs_pipeline.py`
 
 ## 5) Evaluation (SR/GSR/Eo/Eh + Reports)
 

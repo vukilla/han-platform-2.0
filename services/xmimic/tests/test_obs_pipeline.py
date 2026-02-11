@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from xmimic.obs_pipeline import ObservationPipeline, humanx_student_obs_config, humanx_teacher_obs_config
+from xmimic.obs_pipeline import ObservationPipeline, humanoid_network_student_obs_config, humanoid_network_teacher_obs_config
 from xmimic.robot_spec import RobotSpec
 
 
@@ -19,7 +19,7 @@ class TestObsConfigs(unittest.TestCase):
 
     def test_teacher_schema_matches_table_iv(self):
         robot = self._robot()
-        cfg = humanx_teacher_obs_config(robot, history=4)
+        cfg = humanoid_network_teacher_obs_config(robot, history=4)
         self.assertEqual(
             [f.name for f in cfg.fields],
             [
@@ -43,7 +43,7 @@ class TestObsConfigs(unittest.TestCase):
 
     def test_student_nep_schema_matches_table_iv(self):
         robot = self._robot()
-        cfg = humanx_student_obs_config(robot, num_skills=5, mode="nep", history=4)
+        cfg = humanoid_network_student_obs_config(robot, num_skills=5, mode="nep", history=4)
         self.assertEqual(
             [f.name for f in cfg.fields],
             ["base_ang_vel", "gravity", "dof_pos", "dof_vel", "action", "pd_error", "skill_label"],
@@ -56,7 +56,7 @@ class TestObsConfigs(unittest.TestCase):
 
     def test_student_mocap_schema_matches_table_iv(self):
         robot = self._robot()
-        cfg = humanx_student_obs_config(robot, num_skills=5, mode="mocap", history=4)
+        cfg = humanoid_network_student_obs_config(robot, num_skills=5, mode="mocap", history=4)
         self.assertEqual(
             [f.name for f in cfg.fields],
             ["base_ang_vel", "gravity", "dof_pos", "dof_vel", "action", "pd_error", "object_pos", "skill_label"],
@@ -65,7 +65,7 @@ class TestObsConfigs(unittest.TestCase):
 
     def test_pipeline_accepts_common_aliases(self):
         robot = self._robot()
-        cfg = humanx_teacher_obs_config(robot, history=4)
+        cfg = humanoid_network_teacher_obs_config(robot, history=4)
         pipe = ObservationPipeline(cfg)
         dof = len(robot.joint_names)
         key = len(robot.key_bodies)

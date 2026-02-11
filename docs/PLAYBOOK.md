@@ -1,6 +1,6 @@
 # Humanoid Network Build Playbook (Code-First)
 
-This playbook is a consolidated, end-to-end process to build the HumanX-style data factory with XGen and XMimic. It is designed to be executed by a Codex agent in dependency order, using Linear as the execution driver. Figma is optional.
+This playbook is a consolidated, end-to-end process to build the Humanoid Network-style data factory with XGen and XMimic. It is designed to be executed by a Codex agent in dependency order, using Linear as the execution driver. Figma is optional.
 
 ## Product decisions (locked)
 - Incentives chain: Solana first; off-chain points for MVP; EVM later via adapter.
@@ -102,7 +102,7 @@ Each clip exports clip.npz with:
 - Ensure Mac firewall allows inbound 6379 and 9000 (and 9001 if using MinIO console).
 
 ## Outreach email (Yinhuai Wang)
-- Introduce Humanoid Network, describe overlap with HumanX pipeline, mention Noshaba Cheema (MPII/DFKI), ask about collaboration and code release timing, request short call.
+- Introduce Humanoid Network, describe overlap with Humanoid Network pipeline, mention Noshaba Cheema (MPII/DFKI), ask about collaboration and code release timing, request short call.
 
 ## Automation
 - Run continuously on next unblocked Linear issue.

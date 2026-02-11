@@ -1,4 +1,4 @@
-# Han Platform 2.0 Status
+# Han Platform Status
 
 ## Verified (2026-02-10)
 - Mac control-plane starts cleanly:

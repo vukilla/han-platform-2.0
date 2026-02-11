@@ -23,7 +23,7 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "RewardWeights": (".rewards", "RewardWeights"),
     "RewardScales": (".rewards", "RewardScales"),
     "RewardTerm": (".rewards", "RewardTerm"),
-    "HumanXRewardConfig": (".rewards", "HumanXRewardConfig"),
+    "HumanoidNetworkRewardConfig": (".rewards", "HumanoidNetworkRewardConfig"),
     "load_reward_config": (".rewards", "load_reward_config"),
     "compute_reward_terms": (".rewards", "compute_reward_terms"),
     "compute_total_reward": (".rewards", "compute_total_reward"),

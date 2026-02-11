@@ -1,6 +1,6 @@
 # AMP (Adversarial Motion Prior)
 
-This repo includes a minimal AMP discriminator module and reward hook to mirror the HumanX/XMimic use of motion priors.
+This repo includes a minimal AMP discriminator module and reward hook to mirror the Humanoid Network/XMimic use of motion priors.
 
 ## What is implemented
 - `xmimic/amp.py` provides:
@@ -8,7 +8,7 @@ This repo includes a minimal AMP discriminator module and reward hook to mirror 
   - `amp_discriminator_loss` (BCE on expert vs policy samples)
   - `compute_amp_reward` (sigmoid of logits → reward signal)
 - Reward plumbing:
-  - `RewardWeights.amp` and `HumanXRewardConfig.amp_weight`
+  - `RewardWeights.amp` and `HumanoidNetworkRewardConfig.amp_weight`
   - `compute_reward_terms` accepts `obs["amp"]` and adds it to the total reward
   - YAML config supports `amp_weight`
 

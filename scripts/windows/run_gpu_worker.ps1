@@ -28,7 +28,7 @@ if ($MacIp) {
   $env:S3_ENDPOINT = "http://${MacIp}:9000"
   $env:S3_ACCESS_KEY = "minioadmin"
   $env:S3_SECRET_KEY = "minioadmin"
-  $env:S3_BUCKET = "humanx-dev"
+  $env:S3_BUCKET = "humanoid-network-dev"
 }
 
 $env:HAN_WORKER_QUEUES = $Queues

@@ -8,7 +8,7 @@ HUMANOID_GVHMR_DIR="$ROOT_DIR/external/humanoid-projects/GVHMR"
 
 if [[ $# -lt 3 ]]; then
   echo "Usage: $0 <video.mp4> <smplx_model_dir> <output_dir>"
-  echo "Example: $0 /path/sample.mp4 /path/smplx/models /tmp/humanx_out"
+  echo "Example: $0 /path/sample.mp4 /path/smplx/models /tmp/humanoid_network_out"
   exit 1
 fi
 

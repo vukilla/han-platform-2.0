@@ -1,10 +1,10 @@
-# HumanX Table IV Mapping (Observations + Rewards)
+# Humanoid Network Table IV Mapping (Observations + Rewards)
 
-Source of truth: Table IV from the HumanX paper PDF.
-Recommended local path (not committed to git): `docs/references/HumanX.pdf`
+Source of truth: Table IV from the Humanoid Network reference paper PDF.
+Recommended local path (not committed to git): `docs/references/paper.pdf`
 
 Rendered screenshot used for this mapping (not committed to git):
-- `tmp/pdfs/humanx/obs_rewards_zoom.png`
+- `tmp/pdfs/humanoid_network/obs_rewards_zoom.png`
 
 Implementation entrypoints:
 - Observations: `services/xmimic/xmimic/obs_pipeline.py`
@@ -59,8 +59,8 @@ History terms are identical for teacher and student:
 ### Enforced schemas (teacher vs student, NEP vs MoCap)
 
 We encode the Table IV schemas as explicit builders:
-- `humanx_teacher_obs_config(...)`
-- `humanx_student_obs_config(..., mode="nep"|"mocap")`
+- `humanoid_network_teacher_obs_config(...)`
+- `humanoid_network_student_obs_config(..., mode="nep"|"mocap")`
 
 Expected behavior:
 - **Teacher** always includes `object_pos` (privileged state).
@@ -86,7 +86,7 @@ Table IV lists rewards as:
 - Mimic terms (applied to teacher and student)
 - Regularization terms (applied to teacher and student)
 
-In code (`HumanXRewardConfig`), these map to:
+In code (`HumanoidNetworkRewardConfig`), these map to:
 
 ### Mimic Terms (`r_body`, `r_obj`, `r_rel`, `r_c`)
 

@@ -1,6 +1,6 @@
 # PD Control Interface
 
-HumanX requires action semantics parity between simulation and deployment. This repo now includes a PD controller module
+Humanoid Network requires action semantics parity between simulation and deployment. This repo now includes a PD controller module
 that converts policy actions into torques, matching a 100 Hz policy → 1000 Hz PD loop.
 
 ## Code

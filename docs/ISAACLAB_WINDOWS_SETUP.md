@@ -85,7 +85,7 @@ $env:DATABASE_URL   = "postgresql+psycopg://han:han@<MAC_LAN_IP>:5432/han"
 $env:S3_ENDPOINT    = "http://<MAC_LAN_IP>:9000"
 $env:S3_ACCESS_KEY  = "minioadmin"
 $env:S3_SECRET_KEY  = "minioadmin"
-$env:S3_BUCKET      = "humanx-dev"
+$env:S3_BUCKET      = "humanoid-network-dev"
 ```
 Then:
 ```powershell

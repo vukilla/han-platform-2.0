@@ -47,7 +47,7 @@ class RewardTerm:
 
 
 @dataclass
-class HumanXRewardConfig:
+class HumanoidNetworkRewardConfig:
     body_pos: RewardTerm = field(default_factory=RewardTerm)
     body_rot: RewardTerm = field(default_factory=RewardTerm)
     dof_pos: RewardTerm = field(default_factory=RewardTerm)
@@ -77,9 +77,9 @@ def _term_from_payload(payload: Dict, key: str, default: RewardTerm) -> RewardTe
     )
 
 
-def load_reward_config(path: str | Path) -> HumanXRewardConfig:
+def load_reward_config(path: str | Path) -> HumanoidNetworkRewardConfig:
     payload = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-    defaults = HumanXRewardConfig()
+    defaults = HumanoidNetworkRewardConfig()
     # Contact weights can be specified either at top-level or nested under `contact`.
     contact_raw = payload.get("contact", {}) or {}
     contact_weights = payload.get("contact_weights", None)
@@ -98,7 +98,7 @@ def load_reward_config(path: str | Path) -> HumanXRewardConfig:
         raw = payload.get("regularization", {}) or {}
         reg_terms = {str(k): float(v) for k, v in raw.items() if k != "weight"}
 
-    return HumanXRewardConfig(
+    return HumanoidNetworkRewardConfig(
         body_pos=_term_from_payload(payload, "body_pos", defaults.body_pos),
         body_rot=_term_from_payload(payload, "body_rot", defaults.body_rot),
         dof_pos=_term_from_payload(payload, "dof_pos", defaults.dof_pos),
@@ -128,7 +128,7 @@ def _l2_mean_sq(a: np.ndarray, b: np.ndarray) -> float:
 def _l2_mean_sq_norm(a: np.ndarray, b: np.ndarray) -> float:
     """Mean squared L2 norm across the last dimension.
 
-    Paper mapping (HumanX Eq. 10): e_rel_p = ||u_t - u_hat_t||_2^2.
+    Paper mapping (Humanoid Network Eq. 10): e_rel_p = ||u_t - u_hat_t||_2^2.
     We average the squared norms across key bodies (and time, if present).
     """
     diff = np.asarray(a, dtype=np.float32) - np.asarray(b, dtype=np.float32)
@@ -187,7 +187,7 @@ def _relative_vectors(body_pos: np.ndarray, object_pos: np.ndarray) -> np.ndarra
 def _compute_terms_from_config(
     obs: Dict[str, np.ndarray],
     targets: Dict[str, np.ndarray],
-    config: HumanXRewardConfig,
+    config: HumanoidNetworkRewardConfig,
 ) -> Dict[str, float]:
     terms: Dict[str, float] = {}
 
@@ -305,7 +305,7 @@ def compute_reward_terms(
     targets: Dict[str, np.ndarray],
     weights: RewardWeights | None = None,
     scales: Optional[RewardScales] = None,
-    config: HumanXRewardConfig | None = None,
+    config: HumanoidNetworkRewardConfig | None = None,
 ) -> Dict[str, float]:
     if config is not None:
         return _compute_terms_from_config(obs, targets, config)

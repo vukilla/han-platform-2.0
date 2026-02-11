@@ -97,7 +97,7 @@ class ObservationPipeline:
 
         # Two modes:
         # 1) legacy: no explicit history_fields, stack full vector (base_dim) for `history` frames
-        # 2) HumanX-style: output = [current_fields] + stack(history_fields) for `history` frames
+        # 2) Humanoid Network-style: output = [current_fields] + stack(history_fields) for `history` frames
         if config.history_fields:
             self.history = HistoryBuffer(hist_dim, config.history)
         else:
@@ -140,7 +140,7 @@ class ObservationPipeline:
 
 
 def default_obs_config() -> ObservationConfig:
-    """Default observation ordering based on HumanX Table IV (approx).
+    """Default observation ordering based on Humanoid Network Table IV (approx).
 
     Adjust sizes to match your simulator/robot.
     """
@@ -160,7 +160,7 @@ def default_obs_config() -> ObservationConfig:
     )
 
 
-def humanx_teacher_obs_config(
+def humanoid_network_teacher_obs_config(
     robot: RobotSpec,
     *,
     # Table IV shows Skill Label for the student only. Keep this as an opt-in for experiments.
@@ -172,7 +172,7 @@ def humanx_teacher_obs_config(
     history: int = 4,
     normalize: bool = True,
 ) -> ObservationConfig:
-    """HumanX-style privileged teacher observation.
+    """Humanoid Network-style privileged teacher observation.
 
     This follows the intent of Table IV:
     - proprioception + history
@@ -219,7 +219,7 @@ def humanx_teacher_obs_config(
     return ObservationConfig(fields=fields, history_fields=history_fields, history=history, normalize=normalize)
 
 
-def humanx_student_obs_config(
+def humanoid_network_student_obs_config(
     robot: RobotSpec,
     *,
     num_skills: int = 10,
@@ -231,7 +231,7 @@ def humanx_student_obs_config(
     history: int = 4,
     normalize: bool = True,
 ) -> ObservationConfig:
-    """HumanX deployable student observation (NEP or MoCap)."""
+    """Humanoid Network deployable student observation (NEP or MoCap)."""
     dof = len(robot.joint_names)
 
     fields: List[ObsField] = [

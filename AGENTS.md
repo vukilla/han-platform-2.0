@@ -49,5 +49,5 @@ scripts/run_end_to_end_cpu.sh <video.mp4> <smplx_model_dir> <output_dir>
 ## References
 
 - GPU PC setup details: `docs/GPU_PC_SETUP.md`
-- Paper reconciliation status: `docs/HUMANX_PAPER_RECONCILIATION.md`
-- Table IV mapping (obs + reward parity): `docs/HUMANX_TABLE_IV_MAPPING.md`
+- Paper reconciliation status: `docs/HUMANOID_NETWORK_PAPER_RECONCILIATION.md`
+- Table IV mapping (obs + reward parity): `docs/HUMANOID_NETWORK_TABLE_IV_MAPPING.md`
