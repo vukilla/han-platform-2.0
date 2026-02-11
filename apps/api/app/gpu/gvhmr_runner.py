@@ -74,6 +74,82 @@ def _env_bool(name: str, default: bool) -> bool:
     return val in ("1", "true", "yes", "y", "on")
 
 
+def _mp4_has_moov_in_head(path: Path, *, head_bytes: int = 8192) -> bool:
+    """Return True if `moov` atom appears near the beginning of the file (faststart)."""
+    try:
+        with path.open("rb") as f:
+            head = f.read(head_bytes)
+        return b"moov" in head
+    except Exception:
+        return False
+
+
+def _resolve_ffmpeg_cmd() -> list[str] | None:
+    """Resolve an ffmpeg command we can execute.
+
+    Prefer a system ffmpeg, but fall back to imageio-ffmpeg (often installed with GVHMR deps).
+    """
+    exe = shutil.which("ffmpeg")
+    if exe:
+        return [exe]
+    try:
+        import imageio_ffmpeg  # type: ignore
+
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe:
+            return [exe]
+    except Exception:
+        pass
+    return None
+
+
+def _faststart_mp4(path: Path) -> bool:
+    """Remux an MP4 so the `moov` atom is at the start (better streaming/seek on Safari)."""
+    if not path.exists() or path.suffix.lower() != ".mp4":
+        return False
+    if _mp4_has_moov_in_head(path):
+        return False
+    ffmpeg = _resolve_ffmpeg_cmd()
+    if not ffmpeg:
+        return False
+
+    tmp = path.with_suffix(".faststart.mp4")
+    try:
+        proc = subprocess.run(
+            [
+                *ffmpeg,
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(path),
+                "-c",
+                "copy",
+                "-movflags",
+                "+faststart",
+                str(tmp),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            return False
+        if not tmp.exists() or tmp.stat().st_size <= 0:
+            return False
+        tmp.replace(path)
+        return True
+    except Exception:
+        return False
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except Exception:
+            pass
+
+
 def _can_import_pytorch3d_renderer() -> bool:
     try:
         import pytorch3d.renderer  # noqa: F401
@@ -689,6 +765,18 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
             preview = None
             preview_error = f"{type(exc).__name__}: {exc}"
 
+    # Safari/WebKit struggles when MP4s aren't "faststart" (moov atom at end) because it
+    # may need to download the entire file before playback. Remux the rendered videos
+    # so they start instantly and seek smoothly when switching camera angles.
+    faststart = {
+        "input_norm": _faststart_mp4(rendered_input_norm) if rendered_input_norm.exists() else False,
+        "incam": _faststart_mp4(rendered_incam) if rendered_incam.exists() else False,
+        "global45": _faststart_mp4(rendered_global) if rendered_global.exists() else False,
+        "global_front": _faststart_mp4(rendered_global_front) if rendered_global_front.exists() else False,
+        "global_side": _faststart_mp4(rendered_global_side) if rendered_global_side.exists() else False,
+        "preview": _faststart_mp4(preview_path) if preview_path.exists() else False,
+    }
+
     meta = {
         "ok": True,
         "video": str(video_path),
@@ -707,6 +795,7 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         "static_cam": bool(static_cam),
         "use_dpvo": bool(use_dpvo),
         "f_mm": int(f_mm) if f_mm is not None else None,
+        "faststart": faststart,
     }
     meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
