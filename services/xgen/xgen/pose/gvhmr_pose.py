@@ -35,6 +35,62 @@ def _resolve_heavy_checkpoints_root() -> Path:
     )
 
 
+def _path_lexists(path: Path) -> bool:
+    return os.path.lexists(str(path))
+
+
+def _remove_dangling_path(path: Path) -> None:
+    """
+    Remove dangling link/junction artifacts only.
+
+    We intentionally avoid deleting real existing directories/files.
+    """
+    if path.exists() or not _path_lexists(path):
+        return
+    try:
+        path.unlink()
+    except OSError:
+        if os.name == "nt":
+            # Broken directory junctions on Windows may require rmdir.
+            subprocess.run(
+                ["cmd", "/c", "rmdir", str(path)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        if _path_lexists(path):
+            raise
+
+
+def _link_checkpoint_root(src: Path, dst: Path) -> None:
+    """
+    Create a directory link for checkpoints.
+
+    On Windows we fall back to a junction if symlink creation is not available.
+    """
+    try:
+        os.symlink(src, dst, target_is_directory=True)
+        return
+    except FileExistsError:
+        # Another worker may have created it between existence check and link call.
+        if dst.exists() or _path_lexists(dst):
+            return
+        raise
+    except (OSError, NotImplementedError):
+        if os.name != "nt":
+            raise
+
+    proc = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(dst), str(src)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0 and not (dst.exists() or _path_lexists(dst)):
+        detail = (proc.stderr or proc.stdout or "").strip() or f"exit={proc.returncode}"
+        raise RuntimeError(f"Failed to create checkpoint junction {dst} -> {src}: {detail}")
+
+
 def _ensure_checkpoints(gvhmr_root: Path) -> None:
     """
     GVHMR expects checkpoints under <repo>/inputs/checkpoints.
@@ -57,7 +113,11 @@ def _ensure_checkpoints(gvhmr_root: Path) -> None:
     if expected.exists():
         # Avoid destructive behavior; if someone created an empty directory already, leave it as-is.
         return
-    os.symlink(heavy, expected, target_is_directory=True)
+    # If we renamed/moved the repo, a dangling link from the old path may remain.
+    _remove_dangling_path(expected)
+    if expected.exists():
+        return
+    _link_checkpoint_root(heavy, expected)
 
 
 def _find_hmr4d_results(output_root: Path, video_stem: str) -> Path:
