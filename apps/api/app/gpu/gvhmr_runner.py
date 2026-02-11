@@ -245,6 +245,32 @@ def _required_checkpoint_relpaths(*, require_dpvo: bool) -> list[Path]:
     return required
 
 
+def _path_lexists(path: Path) -> bool:
+    return os.path.lexists(str(path))
+
+
+def _remove_dangling_path(path: Path) -> None:
+    """
+    Remove dangling link/junction artifacts only.
+
+    Real existing files/directories are preserved.
+    """
+    if path.exists() or not _path_lexists(path):
+        return
+    try:
+        path.unlink()
+    except OSError:
+        if os.name == "nt":
+            subprocess.run(
+                ["cmd", "/c", "rmdir", str(path)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        if _path_lexists(path):
+            raise
+
+
 def _ensure_checkpoints(gvhmr_root: Path, *, require_dpvo: bool) -> None:
     """Ensure `external/gvhmr/inputs/checkpoints` exists by linking staged checkpoints.
 
@@ -276,13 +302,18 @@ def _ensure_checkpoints(gvhmr_root: Path, *, require_dpvo: bool) -> None:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
 
+    # After repo moves/renames, Windows can leave a dangling link/junction behind.
+    _remove_dangling_path(expected)
+
     try:
         if not expected.exists():
             os.symlink(heavy, expected, target_is_directory=True)
     except OSError:
         # Symlinks are often unavailable on Windows without Developer Mode or Administrator privileges.
         # Fall back to copying the required checkpoints. This is slower but robust.
-        expected.mkdir(parents=True, exist_ok=True)
+        _remove_dangling_path(expected)
+        if not expected.exists():
+            expected.mkdir(parents=True, exist_ok=True)
         for rel in required_files:
             src = heavy / rel
             dst = expected / rel
