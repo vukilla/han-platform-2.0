@@ -146,10 +146,12 @@ index b093ed4..2741e83 100644
                  result_frame = []
              track_history.append(result_frame)
 diff --git a/hmr4d/utils/vis/renderer.py b/hmr4d/utils/vis/renderer.py
-index f4d6232..0f47a5a 100644
+index f4d6232..c263dab 100644
 --- a/hmr4d/utils/vis/renderer.py
 +++ b/hmr4d/utils/vis/renderer.py
-@@ -2,20 +2,51 @@ import cv2
+@@ -1,21 +1,53 @@
+ import cv2
++import os
  import torch
  import numpy as np
  
@@ -215,7 +217,7 @@ index f4d6232..0f47a5a 100644
  
  from .renderer_tools import get_colors, checkerboard_geometry
  
-@@ -105,6 +136,7 @@ def compute_bbox_from_points(X, img_w, img_h, scaleFactor=1.2):
+@@ -105,6 +137,7 @@ def compute_bbox_from_points(X, img_w, img_h, scaleFactor=1.2):
  class Renderer:
      def __init__(self, width, height, focal_length=None, device="cuda", faces=None, K=None, bin_size=None):
          """set bin_size to 0 for no binning"""
@@ -223,7 +225,28 @@ index f4d6232..0f47a5a 100644
          self.width = width
          self.height = height
          self.bin_size = bin_size
-@@ -276,6 +308,7 @@ class Renderer:
+@@ -121,10 +154,19 @@ class Renderer:
+         self.create_renderer()
+ 
+     def create_renderer(self):
++        # PyTorch3D can overflow its coarse rasterization bins for some camera/mesh combinations,
++        # which produces incomplete frames. Increase the per-bin face budget by default.
++        try:
++            max_faces_per_bin = int(os.environ.get("GVHMR_P3D_MAX_FACES_PER_BIN", "50000"))
++        except Exception:
++            max_faces_per_bin = 50000
+         self.renderer = MeshRenderer(
+             rasterizer=MeshRasterizer(
+                 raster_settings=RasterizationSettings(
+-                    image_size=self.image_sizes[0], blur_radius=1e-5, bin_size=self.bin_size
++                    image_size=self.image_sizes[0],
++                    blur_radius=1e-5,
++                    bin_size=self.bin_size,
++                    max_faces_per_bin=max_faces_per_bin,
+                 ),
+             ),
+             shader=SoftPhongShader(
+@@ -276,6 +318,7 @@ class Renderer:
  
  
  def create_meshes(verts, faces, colors):
@@ -231,7 +254,7 @@ index f4d6232..0f47a5a 100644
      """
      :param verts (B, V, 3)
      :param faces (B, F, 3)
-@@ -287,6 +320,7 @@ def create_meshes(verts, faces, colors):
+@@ -287,6 +330,7 @@ def create_meshes(verts, faces, colors):
  
  
  def get_global_cameras(verts, device="cuda", distance=5, position=(-5.0, 5.0, 0.0)):
@@ -239,7 +262,7 @@ index f4d6232..0f47a5a 100644
      """This always put object at the center of view"""
      positions = torch.tensor([position]).repeat(len(verts), 1)
      targets = verts.mean(1)
-@@ -305,6 +339,7 @@ def get_global_cameras(verts, device="cuda", distance=5, position=(-5.0, 5.0, 0.
+@@ -305,6 +349,7 @@ def get_global_cameras(verts, device="cuda", distance=5, position=(-5.0, 5.0, 0.
  def get_global_cameras_static(
      verts, beta=4.0, cam_height_degree=30, target_center_height=1.0, use_long_axis=False, vec_rot=45, device="cuda"
  ):
