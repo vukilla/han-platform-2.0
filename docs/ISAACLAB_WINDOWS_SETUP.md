@@ -14,7 +14,7 @@ This is the Windows-native setup for the GPU PC. No WSL2, no virtualization.
 
 ## MacBook: Start the Control Plane
 
-From `/Users/robertvukosa/Downloads/Python/han-platform-2.0`:
+From `/Users/robertvukosa/Downloads/Python/han-platform`:
 ```bash
 docker compose -f infra/docker-compose.yml up --build
 docker compose -f infra/docker-compose.yml exec api alembic upgrade head
@@ -41,8 +41,8 @@ Open PowerShell:
 ```powershell
 mkdir C:\src
 cd C:\src
-git clone https://github.com/vukilla/han-platform-2.0.git
-cd han-platform-2.0
+git clone https://github.com/vukilla/han-platform.git
+cd han-platform
 code .
 ```
 

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 BUNDLE_DIR="${BUNDLE_DIR:-$ROOT_DIR/tmp/bundles}"
-BUNDLE_NAME="${BUNDLE_NAME:-han-platform-2.0.bundle}"
+BUNDLE_NAME="${BUNDLE_NAME:-han-platform.bundle}"
 BUNDLE_PATH="$BUNDLE_DIR/$BUNDLE_NAME"
 
 mkdir -p "$BUNDLE_DIR"
@@ -22,4 +22,4 @@ echo "Bundle created:"
 echo "  $BUNDLE_PATH"
 echo
 echo "Clone on another machine:"
-echo "  git clone $BUNDLE_NAME han-platform-2.0"
+echo "  git clone $BUNDLE_NAME han-platform"

@@ -3,7 +3,7 @@
 If you start a Codex agent on the gaming PC (Windows), paste this as the first message:
 
 ```text
-You are on the Windows GPU PC in the repo root (han-platform-2.0). Follow AGENTS.md exactly.
+You are on the Windows GPU PC in the repo root (han-platform). Follow AGENTS.md exactly.
 
 Constraints:
 - Do not use WSL2/virtualization.

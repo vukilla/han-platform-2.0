@@ -15,14 +15,14 @@ git push -u origin main
 If you have `gh` installed and authenticated:
 ```bash
 gh auth login --hostname github.com --git-protocol https --web
-./scripts/gh_create_repo_and_push.sh han-platform-2.0 private
+./scripts/gh_create_repo_and_push.sh han-platform private
 ```
 
 If GitHub's web/device auth endpoints are returning `503`, use a Personal Access Token instead:
 ```bash
 export GH_TOKEN="<YOUR_PAT>"
 echo "$GH_TOKEN" | gh auth login --hostname github.com --with-token
-./scripts/gh_create_repo_and_push.sh han-platform-2.0 private
+./scripts/gh_create_repo_and_push.sh han-platform private
 ```
 
 ## Option C: No GitHub Yet (Bundle For USB/Local Transfer)
@@ -34,7 +34,7 @@ If GitHub auth is blocked or you just want to move to the GPU PC immediately:
 
 Then copy the generated `.bundle` file to the other machine and:
 ```bash
-git clone han-platform-2.0.bundle han-platform-2.0
+git clone han-platform.bundle han-platform
 ```
 
 ## Notes

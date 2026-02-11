@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = "Stop"
 
-# Stops any running Celery worker processes launched for han-platform-2.0 on Windows.
+# Stops any running Celery worker processes launched for han-platform on Windows.
 # We match by command line to avoid killing unrelated Python processes.
 
 Write-Host "== Stop GPU Worker (Windows) ==" -ForegroundColor Cyan

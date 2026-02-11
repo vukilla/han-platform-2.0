@@ -1,4 +1,4 @@
-# han-platform-2.0
+# han-platform
 
 HumanX Data Factory scaffolding: Next.js web app, FastAPI backend, XGen/XMimic services, and local infra.
 

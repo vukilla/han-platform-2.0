@@ -87,14 +87,14 @@ try {
   $lp = (Get-ItemProperty -Path "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem" -Name "LongPathsEnabled" -ErrorAction Stop).LongPathsEnabled
   if ($lp -ne 1) {
     Write-Host "[WARN] Windows long paths are NOT enabled (LongPathsEnabled=$lp)." -ForegroundColor Yellow
-    Write-Host "If installs fail with path errors, enable long paths or move this repo to a shorter path like C:\\src\\han-platform-2.0." -ForegroundColor Yellow
+    Write-Host "If installs fail with path errors, enable long paths or move this repo to a shorter path like C:\\src\\han-platform." -ForegroundColor Yellow
   }
 } catch {
   Write-Host "[WARN] Could not read LongPathsEnabled from registry." -ForegroundColor Yellow
 }
 if ($repoRoot.Path -match "OneDrive") {
   Write-Host "[WARN] Repo is under OneDrive. This increases path length and can break installs." -ForegroundColor Yellow
-  Write-Host "Recommended: clone to C:\\src\\han-platform-2.0 for stability." -ForegroundColor Yellow
+  Write-Host "Recommended: clone to C:\\src\\han-platform for stability." -ForegroundColor Yellow
 }
 Write-Host ""
 

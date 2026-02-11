@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 if [[ $# -lt 1 ]]; then
   echo "Usage: $0 <remote-url>"
-  echo "Example: $0 git@github.com:YOUR_ORG/han-platform-2.0.git"
+  echo "Example: $0 git@github.com:YOUR_ORG/han-platform.git"
   exit 2
 fi
 
@@ -18,7 +18,7 @@ fi
 
 git add .
 if ! git diff --cached --quiet; then
-  git commit -m "Initial import: han-platform-2.0"
+  git commit -m "Initial import: han-platform"
 fi
 
 git branch -M main

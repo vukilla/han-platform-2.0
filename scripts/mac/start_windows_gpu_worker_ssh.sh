@@ -14,7 +14,7 @@ set -euo pipefail
 # Optional env vars:
 # - SSH_USER (default: rvuko)
 # - SSH_KEY (default: ~/.ssh/han_windows)
-# - WINDOWS_REPO (default: C:\Users\<user>\OneDrive\Documents\GitHub\han-platform-2.0)
+# - WINDOWS_REPO (default: C:\Users\<user>\OneDrive\Documents\GitHub\han-platform)
 # - ISAACSIM_PATH (default: C:\isaacsim)
 # - REAL_WORKER=1 (use one_click_gpu_worker_real.ps1)
 # - SETUP_GVHMR=1 (only when REAL_WORKER=1)
@@ -43,7 +43,7 @@ fi
 
 SSH_USER="${SSH_USER:-rvuko}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/han_windows}"
-WINDOWS_REPO="${WINDOWS_REPO:-C:\\Users\\${SSH_USER}\\OneDrive\\Documents\\GitHub\\han-platform-2.0}"
+WINDOWS_REPO="${WINDOWS_REPO:-C:\\Users\\${SSH_USER}\\OneDrive\\Documents\\GitHub\\han-platform}"
 ISAACSIM_PATH="${ISAACSIM_PATH:-C:\\isaacsim}"
 
 REAL_WORKER="${REAL_WORKER:-0}"

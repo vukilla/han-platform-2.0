@@ -4,7 +4,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "== han-platform-2.0 Windows Preflight ==" -ForegroundColor Cyan
+Write-Host "== han-platform Windows Preflight ==" -ForegroundColor Cyan
 Write-Host "Time: $(Get-Date -Format o)"
 Write-Host "PWD:  $(Get-Location)"
 Write-Host ""

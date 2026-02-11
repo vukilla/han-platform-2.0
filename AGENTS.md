@@ -1,4 +1,4 @@
-# Codex Agent Instructions (han-platform-2.0)
+# Codex Agent Instructions (han-platform)
 
 This repo is a local-first implementation of the HumanX Data Factory (XGen + XMimic) with a web app + API + job system.
 

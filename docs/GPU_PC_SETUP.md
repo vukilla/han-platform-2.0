@@ -31,8 +31,8 @@ Choose a short path, for example `C:\\src`:
 ```powershell
 mkdir C:\src
 cd C:\src
-git clone https://github.com/vukilla/han-platform-2.0.git
-cd han-platform-2.0
+git clone https://github.com/vukilla/han-platform.git
+cd han-platform
 ```
 
 ## 3) Install Isaac Sim (Windows Native)

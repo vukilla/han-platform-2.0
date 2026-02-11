@@ -2,7 +2,7 @@
 
 ## Verified (2026-02-10)
 - Mac control-plane starts cleanly:
-  - `/Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/mac/control_plane_up.sh`
+  - `/Users/robertvukosa/Downloads/Python/han-platform/scripts/mac/control_plane_up.sh`
   - `GET http://localhost:8000/health` returns `status=ok` (db/redis/s3).
 - Worker detection endpoint includes pose vs gpu:
   - `GET http://localhost:8000/ops/workers?timeout=2.0`
@@ -16,7 +16,7 @@
     - Original video
     - GVHMR 3D skeleton preview (same resolution as the original)
 - CLI smoke test (motion recovery) works:
-  - `/Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/smoke_motion_recovery.sh`
+  - `/Users/robertvukosa/Downloads/Python/han-platform/scripts/smoke_motion_recovery.sh`
 - Navigation simplified:
   - Top nav: Dashboard, Studio, Rewards, Deploy (Coming soon)
   - `/` redirects to `/dashboard`
@@ -28,7 +28,7 @@ One-time setup:
 - Upload via Web UI: `http://localhost:3000/studio` (preferred)
 - Or API: `POST /admin/gvhmr/smplx-model` (multipart field `file`)
 
-Details: `/Users/robertvukosa/Downloads/Python/han-platform-2.0/docs/GVHMR.md`
+Details: `/Users/robertvukosa/Downloads/Python/han-platform/docs/GVHMR.md`
 
 If missing, the platform:
 - Marks pose as fallback (`pose_ok=false`)

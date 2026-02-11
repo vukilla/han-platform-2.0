@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-REPO_NAME="${1:-han-platform-2.0}" # can also be OWNER/REPO
+REPO_NAME="${1:-han-platform}" # can also be OWNER/REPO
 VISIBILITY="${2:-private}"         # private|public|internal
 DESCRIPTION="${3:-HumanX Data Factory (XGen + XMimic) platform scaffold}"
 
@@ -35,7 +35,7 @@ if [[ ! -d .git ]]; then
 fi
 git add .
 if ! git diff --cached --quiet; then
-  git commit -m "Initial import: han-platform-2.0"
+  git commit -m "Initial import: han-platform"
 fi
 git branch -M main
 

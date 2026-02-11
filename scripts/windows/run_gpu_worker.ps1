@@ -10,7 +10,7 @@ $isaacLabBat = Join-Path $repoRoot "external\\isaaclab\\isaaclab.bat"
 $apiDir = Join-Path $repoRoot "apps\\api"
 $workerReq = Join-Path $apiDir "requirements.worker.txt"
 
-Write-Host "== han-platform-2.0 GPU Worker (Windows) ==" -ForegroundColor Cyan
+Write-Host "== han-platform GPU Worker (Windows) ==" -ForegroundColor Cyan
 Write-Host "Repo root: $repoRoot"
 Write-Host ""
 

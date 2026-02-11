@@ -7,7 +7,7 @@ This repo is currently wired so you can validate the full web-app + API + storag
 From your Mac:
 
 ```bash
-cd /Users/robertvukosa/Downloads/Python/han-platform-2.0
+cd /Users/robertvukosa/Downloads/Python/han-platform
 docker compose -f infra/docker-compose.yml up -d --build
 docker compose -f infra/docker-compose.yml exec api alembic upgrade head
 ```
@@ -22,10 +22,10 @@ Optional one-command smoke tests:
 
 ```bash
 # CPU-only golden path (upload -> XGen -> dataset)
-/Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/smoke_local_e2e.sh
+/Users/robertvukosa/Downloads/Python/han-platform/scripts/smoke_local_e2e.sh
 
 # Full golden path including GPU-queue XMimic (requires Windows GPU worker running)
-/Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/smoke_e2e_with_gpu.sh
+/Users/robertvukosa/Downloads/Python/han-platform/scripts/smoke_e2e_with_gpu.sh
 
 # REAL GPU golden path:
 # - XGen on GPU queue with GVHMR pose extraction (video -> SMPL-X NPZ, uploaded to MinIO)
@@ -34,7 +34,7 @@ Optional one-command smoke tests:
 # Requires:
 # - Windows GPU worker running
 # - GVHMR bootstrapped on Windows (see docs/GVHMR.md)
-/Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/smoke_e2e_with_gpu_real.sh
+/Users/robertvukosa/Downloads/Python/han-platform/scripts/smoke_e2e_with_gpu_real.sh
 ```
 
 ## 0.5) Web UI: Motion Recovery Only (Fastest)
@@ -59,7 +59,7 @@ Notes:
 Fastest “do it for me” launch (GVHMR-only, recommended):
 
 ```bash
-WINDOWS_GPU_IP=<windows_ip> /Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/mac/run_gvhmr_studio_ssh.sh
+WINDOWS_GPU_IP=<windows_ip> /Users/robertvukosa/Downloads/Python/han-platform/scripts/mac/run_gvhmr_studio_ssh.sh
 ```
 
 This will:
@@ -76,7 +76,7 @@ Fastest REAL “do it for me” launch (GVHMR + Isaac Lab PPO):
 # Optional: pass a video path. If omitted, the script uses:
 # - /Users/robertvukosa/Desktop/delivery-man-...mp4 if it exists, else
 # - assets/sample_videos/cargo_pickup_01.mp4
-/Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/mac/run_full_e2e_real.sh
+/Users/robertvukosa/Downloads/Python/han-platform/scripts/mac/run_full_e2e_real.sh
 ```
 
 2. When it prints your Mac IP, run the printed Windows command on the GPU PC.
@@ -87,7 +87,7 @@ Fastest REAL “do it for me” launch (GVHMR + Isaac Lab PPO):
 If you have SSH access from your Mac to the Windows GPU PC (recommended), you can do it in one command:
 
 ```bash
-WINDOWS_GPU_IP=<windows_ip> /Users/robertvukosa/Downloads/Python/han-platform-2.0/scripts/mac/run_full_e2e_real_ssh.sh
+WINDOWS_GPU_IP=<windows_ip> /Users/robertvukosa/Downloads/Python/han-platform/scripts/mac/run_full_e2e_real_ssh.sh
 ```
 
 This will:
