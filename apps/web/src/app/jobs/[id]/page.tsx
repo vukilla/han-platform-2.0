@@ -123,6 +123,8 @@ export default function JobProgressPage() {
     if (!logsUri) return;
     let timer: NodeJS.Timeout | null = null;
     let cancelled = false;
+    let lastTail: string | null = null;
+    const isTerminal = (s: string | null | undefined) => s === "COMPLETED" || s === "FAILED";
 
     async function fetchLogs() {
       try {
@@ -130,19 +132,25 @@ export default function JobProgressPage() {
         if (!res.ok) return;
         const text = await res.text();
         const tail = text.split("\n").slice(-200).join("\n");
-        if (!cancelled) setJobLogTail(tail);
+        if (!cancelled && tail !== lastTail) {
+          lastTail = tail;
+          setJobLogTail(tail);
+        }
       } catch {
         // ignore
       }
     }
 
     fetchLogs();
-    timer = setInterval(fetchLogs, 3000);
+    // Once the job is terminal, stop polling logs to avoid pointless rerenders that can hurt video playback.
+    if (!isTerminal(job?.status)) {
+      timer = setInterval(fetchLogs, 3000);
+    }
     return () => {
       cancelled = true;
       if (timer) clearInterval(timer);
     };
-  }, [job?.logs_uri]);
+  }, [job?.logs_uri, job?.status]);
 
   useEffect(() => {
     if (!job?.demo_id) return;
@@ -403,7 +411,7 @@ export default function JobProgressPage() {
     syncLockRef.current = false;
   }, []);
 
-  const handleOriginalSeeking = useCallback(() => {
+  const handleOriginalSeeked = useCallback(() => {
     const a = originalVideoRef.current;
     const b = previewVideoRef.current;
     if (!a || !b) return;
@@ -435,50 +443,6 @@ export default function JobProgressPage() {
     }
     syncLockRef.current = false;
   }, [syncRate, syncTime]);
-
-  const handlePreviewPlay = useCallback(() => {
-    const a = originalVideoRef.current;
-    const b = previewVideoRef.current;
-    if (!a || !b) return;
-    if (syncLockRef.current) return;
-    syncLockRef.current = true;
-    syncRate(b, a);
-    syncTime(b, a, { force: true });
-    a.play()
-      .catch(() => null)
-      .finally(() => {
-        syncLockRef.current = false;
-      });
-  }, [syncRate, syncTime]);
-
-  const handlePreviewPause = useCallback(() => {
-    const a = originalVideoRef.current;
-    if (!a) return;
-    if (syncLockRef.current) return;
-    syncLockRef.current = true;
-    a.pause();
-    syncLockRef.current = false;
-  }, []);
-
-  const handlePreviewSeeking = useCallback(() => {
-    const a = originalVideoRef.current;
-    const b = previewVideoRef.current;
-    if (!a || !b) return;
-    if (syncLockRef.current) return;
-    syncLockRef.current = true;
-    syncTime(b, a, { force: true });
-    syncLockRef.current = false;
-  }, [syncTime]);
-
-  const handlePreviewRateChange = useCallback(() => {
-    const a = originalVideoRef.current;
-    const b = previewVideoRef.current;
-    if (!a || !b) return;
-    if (syncLockRef.current) return;
-    syncLockRef.current = true;
-    syncRate(b, a);
-    syncLockRef.current = false;
-  }, [syncRate]);
 
   async function handleRequeue() {
     if (!jobId) return;
@@ -596,10 +560,11 @@ export default function JobProgressPage() {
                   className="w-full rounded-2xl border border-black/10 bg-black"
                   controls
                   playsInline
+                  preload="auto"
                   src={originalVideoSrc}
                   onPlay={handleOriginalPlay}
                   onPause={handleOriginalPause}
-                  onSeeking={handleOriginalSeeking}
+                  onSeeked={handleOriginalSeeked}
                   onRateChange={handleOriginalRateChange}
                 />
               ) : (
@@ -627,14 +592,11 @@ export default function JobProgressPage() {
                 <video
                   ref={previewVideoRef}
                   className="w-full rounded-2xl border border-black/10 bg-black"
-                  controls
                   playsInline
+                  muted
+                  preload="auto"
                   src={selectedPreviewSrc}
                   onLoadedMetadata={handlePreviewLoadedMetadata}
-                  onPlay={handlePreviewPlay}
-                  onPause={handlePreviewPause}
-                  onSeeking={handlePreviewSeeking}
-                  onRateChange={handlePreviewRateChange}
                 />
               ) : originalVideoSrc ? (
                 <div className="relative">
