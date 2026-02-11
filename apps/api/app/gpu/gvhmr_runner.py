@@ -150,6 +150,78 @@ def _faststart_mp4(path: Path) -> bool:
             pass
 
 
+def _optimize_preview_mp4_for_webkit(path: Path, *, fps: int = 30, gop_seconds: float = 1.0) -> bool:
+    """Re-encode preview MP4s for smooth seeking/switching in Safari/WebKit.
+
+    GVHMR's default encoder settings can produce very long GOPs (e.g. 8+ seconds between keyframes).
+    When the user switches camera angles mid-playback we seek into the newly-selected preview; with
+    sparse keyframes, Safari can appear to lag while it decodes from a distant keyframe.
+
+    We trade a small file-size increase for predictable keyframes + faststart.
+    """
+    if not path.exists() or path.suffix.lower() != ".mp4":
+        return False
+    ffmpeg = _resolve_ffmpeg_cmd()
+    if not ffmpeg:
+        return False
+
+    gop = max(1, int(round(float(fps) * float(gop_seconds))))
+    tmp = path.with_suffix(".webkit.mp4")
+    try:
+        proc = subprocess.run(
+            [
+                *ffmpeg,
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(path),
+                "-an",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "23",
+                "-pix_fmt",
+                "yuv420p",
+                "-profile:v",
+                "main",
+                "-level",
+                "3.1",
+                "-g",
+                str(gop),
+                "-keyint_min",
+                str(gop),
+                "-sc_threshold",
+                "0",
+                "-bf",
+                "0",
+                "-movflags",
+                "+faststart",
+                str(tmp),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            return False
+        if not tmp.exists() or tmp.stat().st_size <= 0:
+            return False
+        tmp.replace(path)
+        return True
+    except Exception:
+        return False
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except Exception:
+            pass
+
+
 def _can_import_pytorch3d_renderer() -> bool:
     try:
         import pytorch3d.renderer  # noqa: F401
@@ -765,17 +837,27 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
             preview = None
             preview_error = f"{type(exc).__name__}: {exc}"
 
-    # Safari/WebKit struggles when MP4s aren't "faststart" (moov atom at end) because it
-    # may need to download the entire file before playback. Remux the rendered videos
-    # so they start instantly and seek smoothly when switching camera angles.
-    faststart = {
+    # Safari/WebKit can look laggy if MP4s have sparse keyframes or aren't "faststart".
+    # Keep the input-normalized video as a cheap remux, but re-encode previews for responsive seeks.
+    faststart: dict[str, bool] = {
         "input_norm": _faststart_mp4(rendered_input_norm) if rendered_input_norm.exists() else False,
-        "incam": _faststart_mp4(rendered_incam) if rendered_incam.exists() else False,
-        "global45": _faststart_mp4(rendered_global) if rendered_global.exists() else False,
-        "global_front": _faststart_mp4(rendered_global_front) if rendered_global_front.exists() else False,
-        "global_side": _faststart_mp4(rendered_global_side) if rendered_global_side.exists() else False,
-        "preview": _faststart_mp4(preview_path) if preview_path.exists() else False,
     }
+    optimized: dict[str, bool] = {}
+    for label, path in (
+        ("incam", rendered_incam),
+        ("global45", rendered_global),
+        ("global_front", rendered_global_front),
+        ("global_side", rendered_global_side),
+        ("preview", preview_path),
+    ):
+        if not path.exists():
+            optimized[label] = False
+            continue
+        did_opt = _optimize_preview_mp4_for_webkit(path)
+        optimized[label] = did_opt
+        # Fallback: even if re-encode fails, at least faststart remux for smoother buffering.
+        if not did_opt:
+            faststart[label] = _faststart_mp4(path)
 
     meta = {
         "ok": True,
@@ -796,6 +878,7 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         "use_dpvo": bool(use_dpvo),
         "f_mm": int(f_mm) if f_mm is not None else None,
         "faststart": faststart,
+        "optimized_for_webkit": optimized,
     }
     meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
