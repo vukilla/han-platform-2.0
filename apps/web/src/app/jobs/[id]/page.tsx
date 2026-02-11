@@ -64,6 +64,9 @@ export default function JobProgressPage() {
   const originalVideoRef = useRef<HTMLVideoElement | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const syncLockRef = useRef(false);
+  const resumeAfterPreviewReadyRef = useRef(false);
+  const previewBlobUrlsRef = useRef<Record<string, string>>({});
+  const [previewBlobUrls, setPreviewBlobUrls] = useState<Record<string, string>>({});
 
   const onlyPose = Boolean(job?.params_json?.only_pose);
 
@@ -363,6 +366,67 @@ export default function JobProgressPage() {
   }, [posePreviewIncam, posePreview, posePreviewGlobalFront, posePreviewGlobalSide]);
 
   const selectedPreviewSrc = (previewViews.find((v) => v.id === selectedPreviewId) ?? previewViews[0] ?? null)?.src ?? null;
+  const selectedPreviewSrcResolved =
+    (selectedPreviewId ? previewBlobUrls[selectedPreviewId] : null) ??
+    (previewBlobUrls[(previewViews.find((v) => v.src === selectedPreviewSrc) ?? { id: "" }).id] ?? null) ??
+    selectedPreviewSrc;
+
+  useEffect(() => {
+    previewBlobUrlsRef.current = previewBlobUrls;
+  }, [previewBlobUrls]);
+
+  useEffect(() => {
+    const links = previewViews.map((v) => `${v.id}|${v.src}`).join("||");
+    if (!links) return;
+    let cancelled = false;
+    const ac = new AbortController();
+
+    const ensureBlob = async (id: string, src: string) => {
+      if (previewBlobUrlsRef.current[id]) return;
+      try {
+        const res = await fetch(src, { signal: ac.signal });
+        if (!res.ok) return;
+        const blob = await res.blob();
+        if (cancelled) return;
+        const objectUrl = URL.createObjectURL(blob);
+        setPreviewBlobUrls((prev) => {
+          const existing = prev[id];
+          if (existing) {
+            URL.revokeObjectURL(objectUrl);
+            return prev;
+          }
+          return { ...prev, [id]: objectUrl };
+        });
+      } catch {
+        // Best-effort prefetch only.
+      }
+    };
+
+    void (async () => {
+      for (const view of previewViews) {
+        if (cancelled) break;
+        await ensureBlob(view.id, view.src);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+    // `links` tracks ids/src changes without requiring deep-compare helpers.
+  }, [previewViews, previewViews.length, selectedPreviewId]);
+
+  useEffect(() => {
+    return () => {
+      for (const url of Object.values(previewBlobUrlsRef.current)) {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, []);
 
   const clampTime = useCallback((t: number, video: HTMLVideoElement) => {
     const d = video.duration;
@@ -441,11 +505,25 @@ export default function JobProgressPage() {
     syncLockRef.current = true;
     syncRate(a, b);
     syncTime(a, b, { force: true });
-    if (!a.paused) {
+    if (!a.paused || resumeAfterPreviewReadyRef.current) {
+      resumeAfterPreviewReadyRef.current = false;
+      // Re-start original from the same point so both panes resume in lockstep after angle switch.
+      a.play().catch(() => null);
       b.play().catch(() => null);
     }
     syncLockRef.current = false;
   }, [syncRate, syncTime]);
+
+  const handlePreviewSelectChange = useCallback((nextPreviewId: string) => {
+    const a = originalVideoRef.current;
+    if (a && !a.paused) {
+      resumeAfterPreviewReadyRef.current = true;
+      a.pause();
+    } else {
+      resumeAfterPreviewReadyRef.current = false;
+    }
+    setSelectedPreviewId(nextPreviewId);
+  }, []);
 
   async function handleRequeue() {
     if (!jobId) return;
@@ -581,7 +659,7 @@ export default function JobProgressPage() {
                   <select
                     className="rounded-xl border border-black/15 bg-white px-3 py-2 text-xs font-semibold text-black"
                     value={selectedPreviewId}
-                    onChange={(event) => setSelectedPreviewId(event.target.value)}
+                    onChange={(event) => handlePreviewSelectChange(event.target.value)}
                   >
                     {previewViews.map((view) => (
                       <option key={view.id} value={view.id}>
@@ -598,7 +676,7 @@ export default function JobProgressPage() {
                   playsInline
                   muted
                   preload="auto"
-                  src={selectedPreviewSrc}
+                  src={selectedPreviewSrcResolved}
                   onLoadedMetadata={handlePreviewLoadedMetadata}
                 />
               ) : originalVideoSrc ? (
