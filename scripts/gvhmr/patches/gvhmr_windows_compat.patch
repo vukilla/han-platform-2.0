@@ -146,7 +146,7 @@ index b093ed4..2741e83 100644
                  result_frame = []
              track_history.append(result_frame)
 diff --git a/hmr4d/utils/vis/renderer.py b/hmr4d/utils/vis/renderer.py
-index f4d6232..c263dab 100644
+index f4d6232..5df0e57 100644
 --- a/hmr4d/utils/vis/renderer.py
 +++ b/hmr4d/utils/vis/renderer.py
 @@ -1,21 +1,53 @@
@@ -217,25 +217,27 @@ index f4d6232..c263dab 100644
  
  from .renderer_tools import get_colors, checkerboard_geometry
  
-@@ -105,6 +137,7 @@ def compute_bbox_from_points(X, img_w, img_h, scaleFactor=1.2):
+@@ -105,8 +137,19 @@ def compute_bbox_from_points(X, img_w, img_h, scaleFactor=1.2):
  class Renderer:
      def __init__(self, width, height, focal_length=None, device="cuda", faces=None, K=None, bin_size=None):
          """set bin_size to 0 for no binning"""
 +        _require_pytorch3d()
          self.width = width
          self.height = height
-         if bin_size is None:
-             # Allow forcing rasterizer mode from env without touching callsites.
-             # - "0" => disable coarse binning (naive rasterization, avoids bin overflow artifacts)
-             # - empty/none/auto => keep PyTorch3D default behavior
-             raw_bin_size = str(os.environ.get("GVHMR_P3D_BIN_SIZE", "")).strip().lower()
-             if raw_bin_size and raw_bin_size not in ("none", "auto", "default"):
-                 try:
-                     bin_size = int(raw_bin_size)
-                 except Exception:
-                     bin_size = None
++        if bin_size is None:
++            # Allow forcing rasterizer mode from env without touching callsites.
++            # - "0" => disable coarse binning (naive rasterization, avoids bin overflow artifacts)
++            # - empty/none/auto => keep PyTorch3D default behavior
++            raw_bin_size = str(os.environ.get("GVHMR_P3D_BIN_SIZE", "")).strip().lower()
++            if raw_bin_size and raw_bin_size not in ("none", "auto", "default"):
++                try:
++                    bin_size = int(raw_bin_size)
++                except Exception:
++                    bin_size = None
          self.bin_size = bin_size
-@@ -121,10 +154,19 @@ class Renderer:
+         assert (focal_length is not None) ^ (K is not None), "focal_length and K are mutually exclusive"
+ 
+@@ -121,10 +164,19 @@ class Renderer:
          self.create_renderer()
  
      def create_renderer(self):
@@ -256,7 +258,7 @@ index f4d6232..c263dab 100644
                  ),
              ),
              shader=SoftPhongShader(
-@@ -276,6 +318,7 @@ class Renderer:
+@@ -276,6 +328,7 @@ class Renderer:
  
  
  def create_meshes(verts, faces, colors):
@@ -264,7 +266,7 @@ index f4d6232..c263dab 100644
      """
      :param verts (B, V, 3)
      :param faces (B, F, 3)
-@@ -287,6 +330,7 @@ def create_meshes(verts, faces, colors):
+@@ -287,6 +340,7 @@ def create_meshes(verts, faces, colors):
  
  
  def get_global_cameras(verts, device="cuda", distance=5, position=(-5.0, 5.0, 0.0)):
@@ -272,7 +274,7 @@ index f4d6232..c263dab 100644
      """This always put object at the center of view"""
      positions = torch.tensor([position]).repeat(len(verts), 1)
      targets = verts.mean(1)
-@@ -305,6 +349,7 @@ def get_global_cameras(verts, device="cuda", distance=5, position=(-5.0, 5.0, 0.
+@@ -305,6 +359,7 @@ def get_global_cameras(verts, device="cuda", distance=5, position=(-5.0, 5.0, 0.
  def get_global_cameras_static(
      verts, beta=4.0, cam_height_degree=30, target_center_height=1.0, use_long_axis=False, vec_rot=45, device="cuda"
  ):
