@@ -75,24 +75,43 @@ export default function JobProgressPage() {
 
   useEffect(() => {
     let timer: NodeJS.Timeout | null = null;
+    let cancelled = false;
 
-    async function fetchStatus() {
+    const isTerminal = (status: string | null | undefined) => status === "COMPLETED" || status === "FAILED";
+
+    async function fetchStatus(): Promise<string | null> {
       if (!jobId) {
-        return;
+        return null;
       }
       try {
         const response = await getXgenJob(jobId);
+        if (cancelled) return null;
         setJob(response);
         setError(null);
+        // Stop polling once the job is terminal. Otherwise we'd keep re-presigning S3 URLs
+        // and React would reload the <video> sources every poll, which looks like flicker/black frames.
+        if (isTerminal(response.status) && timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+        return response.status ?? null;
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load job");
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load job");
+        }
+        return null;
       }
     }
 
-    fetchStatus();
-    timer = setInterval(fetchStatus, 3000);
+    void (async () => {
+      const status = await fetchStatus();
+      if (!cancelled && !isTerminal(status)) {
+        timer = setInterval(fetchStatus, 3000);
+      }
+    })();
 
     return () => {
+      cancelled = true;
       if (timer) {
         clearInterval(timer);
       }
