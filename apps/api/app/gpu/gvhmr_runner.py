@@ -750,6 +750,10 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         env.setdefault("GVHMR_RENDER_INCAM", "1")
         # Render extra global views (front/side) so the Studio UI can offer a view toggle.
         env.setdefault("GVHMR_RENDER_EXTRA_VIEWS", "1")
+        # Prevent coarse-rasterizer bin overflow artifacts (black/flicker frames) in global views.
+        # `bin_size=0` uses naive rasterization, which is slower but stable for preview generation.
+        env.setdefault("GVHMR_P3D_BIN_SIZE", "0")
+        env.setdefault("GVHMR_P3D_MAX_FACES_PER_BIN", "200000")
 
     # The Windows bootstrap installs a minimal `external/gvhmr/pytorch3d` stub so GVHMR can
     # run inference without the full PyTorch3D renderer. When native rendering is enabled
