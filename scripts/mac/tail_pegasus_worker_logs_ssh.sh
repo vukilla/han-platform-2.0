@@ -4,8 +4,8 @@ set -euo pipefail
 # Tail the Linux worker logs on Pegasus over SSH.
 #
 # Usage:
-#   PEGASUS_HOST=pegasus.dfki.de ./scripts/mac/tail_pegasus_worker_logs_ssh.sh
-#   ./scripts/mac/tail_pegasus_worker_logs_ssh.sh pegasus.dfki.de
+#   PEGASUS_HOST=dfki ./scripts/mac/tail_pegasus_worker_logs_ssh.sh
+#   ./scripts/mac/tail_pegasus_worker_logs_ssh.sh dfki
 
 PEGASUS_HOST="${PEGASUS_HOST:-${1:-}}"
 if [[ -z "$PEGASUS_HOST" ]]; then
@@ -15,21 +15,37 @@ if [[ -z "$PEGASUS_HOST" ]]; then
   exit 1
 fi
 
-SSH_USER="${SSH_USER:-rvuko}"
-SSH_KEY="${SSH_KEY:-$HOME/.ssh/pegasus}"
+SSH_USER="${SSH_USER:-}"
+SSH_KEY="${SSH_KEY:-}"
+if [[ -z "$SSH_KEY" && -f "$HOME/.ssh/dfki_pegasus" ]]; then
+  SSH_KEY="$HOME/.ssh/dfki_pegasus"
+fi
 PEGASUS_REPO="${PEGASUS_REPO:-~/han-platform}"
 OUT_LOG="${PEGASUS_REPO}/tmp/pegasus_worker.out.log"
 ERR_LOG="${PEGASUS_REPO}/tmp/pegasus_worker.err.log"
 
 echo "== Tail Pegasus Worker Logs over SSH =="
 echo "Pegasus host: $PEGASUS_HOST"
-echo "SSH user:     $SSH_USER"
+if [[ -n "$SSH_USER" ]]; then
+  echo "SSH user:     $SSH_USER"
+else
+  echo "SSH user:     <from ssh config>"
+fi
 echo "Out log:      $OUT_LOG"
 echo "Err log:      $ERR_LOG"
 echo ""
 
-ssh -i "$SSH_KEY" -o IdentitiesOnly=yes -o PreferredAuthentications=publickey "${SSH_USER}@${PEGASUS_HOST}" \
-  "bash -s -- $(printf '%q ' "$OUT_LOG" "$ERR_LOG")" <<'REMOTE'
+ssh_target="$PEGASUS_HOST"
+if [[ -n "$SSH_USER" && "$ssh_target" != *@* ]]; then
+  ssh_target="${SSH_USER}@${ssh_target}"
+fi
+
+ssh_cmd=(ssh)
+if [[ -n "$SSH_KEY" ]]; then
+  ssh_cmd+=(-i "$SSH_KEY" -o IdentitiesOnly=yes -o PreferredAuthentications=publickey)
+fi
+
+"${ssh_cmd[@]}" "$ssh_target" "bash -s -- $(printf '%q ' "$OUT_LOG" "$ERR_LOG")" <<'REMOTE'
 set -euo pipefail
 
 out_log="$1"

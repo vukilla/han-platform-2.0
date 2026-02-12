@@ -33,9 +33,8 @@ If your worker will run GVHMR pose recovery, install the extra GVHMR dependencie
 From your Mac repo:
 
 ```bash
-export PEGASUS_HOST=pegasus.dfki.de
-export SSH_USER=rvuko
-export SSH_KEY=~/.ssh/pegasus
+export PEGASUS_HOST=dfki
+export SSH_KEY=~/.ssh/dfki_pegasus
 
 # Point to your always-on control-plane endpoints.
 export REDIS_URL=redis://<CONTROL_PLANE_HOST>:6379/0

@@ -4,12 +4,12 @@ set -euo pipefail
 # Start a Linux worker on Pegasus over SSH.
 #
 # Usage:
-#   PEGASUS_HOST=pegasus.dfki.de ./scripts/mac/start_pegasus_worker_ssh.sh
-#   ./scripts/mac/start_pegasus_worker_ssh.sh pegasus.dfki.de
+#   PEGASUS_HOST=dfki ./scripts/mac/start_pegasus_worker_ssh.sh
+#   ./scripts/mac/start_pegasus_worker_ssh.sh dfki
 #
 # Optional env vars:
-# - SSH_USER (default: rvuko)
-# - SSH_KEY (default: ~/.ssh/pegasus)
+# - SSH_USER (optional, if already configured in ~/.ssh/config leave empty)
+# - SSH_KEY (default: ~/.ssh/dfki_pegasus if present)
 # - PEGASUS_REPO (default: ~/han-platform)
 # - PULL_REPO (default: 1)
 # - INSTALL_REQS (default: 0)
@@ -32,8 +32,11 @@ if [[ -z "$PEGASUS_HOST" ]]; then
   exit 1
 fi
 
-SSH_USER="${SSH_USER:-rvuko}"
-SSH_KEY="${SSH_KEY:-$HOME/.ssh/pegasus}"
+SSH_USER="${SSH_USER:-}"
+SSH_KEY="${SSH_KEY:-}"
+if [[ -z "$SSH_KEY" && -f "$HOME/.ssh/dfki_pegasus" ]]; then
+  SSH_KEY="$HOME/.ssh/dfki_pegasus"
+fi
 PEGASUS_REPO="${PEGASUS_REPO:-~/han-platform}"
 PULL_REPO="${PULL_REPO:-1}"
 INSTALL_REQS="${INSTALL_REQS:-0}"
@@ -83,15 +86,33 @@ ERR_LOG="${PEGASUS_REPO}/tmp/pegasus_worker.err.log"
 echo "== Start Pegasus Worker over SSH =="
 echo "Repo:         $ROOT_DIR"
 echo "Pegasus host: $PEGASUS_HOST"
-echo "SSH user:     $SSH_USER"
-echo "SSH key:      $SSH_KEY"
+if [[ -n "$SSH_USER" ]]; then
+  echo "SSH user:     $SSH_USER"
+else
+  echo "SSH user:     <from ssh config>"
+fi
+if [[ -n "$SSH_KEY" ]]; then
+  echo "SSH key:      $SSH_KEY"
+else
+  echo "SSH key:      <from ssh config/agent>"
+fi
 echo "Remote repo:  $PEGASUS_REPO"
 echo "Queues:       $HAN_WORKER_QUEUES"
 echo "Log out:      $OUT_LOG"
 echo "Log err:      $ERR_LOG"
 echo ""
 
-ssh -i "$SSH_KEY" -o IdentitiesOnly=yes -o PreferredAuthentications=publickey "${SSH_USER}@${PEGASUS_HOST}" \
+ssh_target="$PEGASUS_HOST"
+if [[ -n "$SSH_USER" && "$ssh_target" != *@* ]]; then
+  ssh_target="${SSH_USER}@${ssh_target}"
+fi
+
+ssh_cmd=(ssh)
+if [[ -n "$SSH_KEY" ]]; then
+  ssh_cmd+=(-i "$SSH_KEY" -o IdentitiesOnly=yes -o PreferredAuthentications=publickey)
+fi
+
+"${ssh_cmd[@]}" "$ssh_target" \
   "bash -s -- $(printf '%q ' "$PEGASUS_REPO" "$PULL_REPO" "$INSTALL_REQS" "$HAN_PYTHON_BIN" "$HAN_WORKER_QUEUES" "$HAN_WORKER_POOL" "$HAN_WORKER_CONCURRENCY" "$REDIS_URL" "$DATABASE_URL" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" "$S3_BUCKET" "$S3_REGION" "$S3_SECURE" "$GVHMR_NATIVE_RENDER" "$GVHMR_RENDER_DEVICE" "$GVHMR_RENDER_INCAM" "$GVHMR_RENDER_EXTRA_VIEWS" "$PID_FILE" "$OUT_LOG" "$ERR_LOG")" <<'REMOTE'
 set -euo pipefail
 
