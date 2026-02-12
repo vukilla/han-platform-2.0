@@ -1113,6 +1113,31 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         env.setdefault("GVHMR_P3D_BIN_SIZE", "0")
         env.setdefault("GVHMR_P3D_MAX_FACES_PER_BIN", "1000000")
 
+    # GVHMR's demo script uses ffmpeg-python which shells out to a binary named `ffmpeg`.
+    # Some environments (notably Pegasus compute nodes) do not have a system ffmpeg on PATH.
+    # We vendor a tiny shim directory with an `ffmpeg` executable (symlink or copy) so the demo
+    # can merge videos without requiring system-level packages.
+    ffmpeg_cmd = _resolve_ffmpeg_cmd()
+    if ffmpeg_cmd and not shutil.which("ffmpeg"):
+        shim_dir = output_dir / "_ffmpeg_shim"
+        try:
+            shim_dir.mkdir(parents=True, exist_ok=True)
+            shim_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+            shim_path = shim_dir / shim_name
+            if not shim_path.exists():
+                src = Path(ffmpeg_cmd[0])
+                try:
+                    os.symlink(str(src), str(shim_path))
+                except Exception:
+                    try:
+                        shutil.copy2(src, shim_path)
+                        shim_path.chmod(0o755)
+                    except Exception:
+                        pass
+            env["PATH"] = str(shim_dir) + os.pathsep + env.get("PATH", "")
+        except Exception:
+            pass
+
     # The Windows bootstrap installs a minimal `external/gvhmr/pytorch3d` stub so GVHMR can
     # run inference without the full PyTorch3D renderer. When native rendering is enabled
     # (GVHMR_NATIVE_RENDER=1), the stub would shadow the real `pytorch3d` package in
