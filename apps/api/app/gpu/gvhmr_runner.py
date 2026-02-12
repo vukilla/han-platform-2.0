@@ -611,9 +611,11 @@ def _render_gvhmr_global_preview(
         verts_global = model_mesh(bp_g.to(device), be_g.to(device), go_g.to(device), tr_g.to(device)).squeeze(0)
 
     # === Normalize + face-Z transform for global view (approx GVHMR `move_to_start_point_face_z`) ===
-    # Use a robust ground estimate. A single bad vertex in one frame can push `min()` far below
-    # the true floor, which makes the whole body float above the checkered plane.
-    min_y_per_frame = verts_global[..., 1].amin(dim=1).detach().cpu().numpy()
+    # Ground the body using joints, not vertices. Vertex mins can contain outliers that push the
+    # estimated floor far below the true ground, causing the body to float above the checkerboard.
+    #
+    # Joints are far more stable: the minimum joint height per frame should be near the feet.
+    min_y_per_frame = joints_global_smpl24[..., 1].amin(dim=1).detach().cpu().numpy()
     floor_y = float(np.percentile(min_y_per_frame, 10))
 
     offset = joints_global_smpl24[0, 0].detach().clone()
@@ -627,7 +629,7 @@ def _render_gvhmr_global_preview(
     verts_global = apply_T_on_points(verts_global, T_seq)
 
     # Re-level after the global transform, in case it introduces a small vertical drift.
-    min_y_per_frame2 = verts_global[..., 1].amin(dim=1).detach().cpu().numpy()
+    min_y_per_frame2 = joints_global_smpl24[..., 1].amin(dim=1).detach().cpu().numpy()
     floor_y2 = float(np.percentile(min_y_per_frame2, 10))
     joints_global_smpl24[..., 1] = joints_global_smpl24[..., 1] - float(floor_y2)
     verts_global[..., 1] = verts_global[..., 1] - float(floor_y2)
@@ -654,11 +656,11 @@ def _render_gvhmr_global_preview(
     vec_rad = float(math.radians(float(yaw_deg)))
     vec = torch.tensor([math.sin(vec_rad), 0.0, math.cos(vec_rad)], dtype=torch.float32)
     vec = vec / torch.norm(vec)
-    # Aim at the body center, not an arbitrary fixed height, so the subject stays centered.
-    body_y_min = float(verts_global[..., 1].min().item())
-    body_y_max = float(verts_global[..., 1].max().item())
+    # Aim at the body center (based on joints, which are robust) so the subject stays centered.
+    body_y_min = float(joints_global_smpl24[..., 1].min().item())
+    body_y_max = float(joints_global_smpl24[..., 1].max().item())
     body_h = float(max(body_y_max - body_y_min, 1.0))
-    target_y = float(max(0.7, body_y_min + body_h * 0.55))
+    target_y = float(body_y_min + body_h * 0.55)
 
     def _look_at_world_to_cam(pos: torch.Tensor, at: torch.Tensor, up_vec: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         # Returns (R, t) such that p_cam = p_world @ R.T + t
