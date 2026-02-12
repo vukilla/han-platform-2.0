@@ -497,23 +497,29 @@ def _render_gvhmr_global_preview(
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         body_pose = _as_tensor(params.get("body_pose")).float()
         global_orient = _as_tensor(params.get("global_orient")).float()
-        transl = params.get("transl", None)
-        transl = (
-            _as_tensor(transl).float()
-            if transl is not None
-            else torch.zeros((body_pose.shape[0], 3), dtype=torch.float32)
-        )
         betas = _as_tensor(params.get("betas")).float()
+        transl_raw = params.get("transl", None)
+        transl = _as_tensor(transl_raw).float() if transl_raw is not None else None
 
-        # Add batch dim expected by SmplxLite.
+        # Normalize shapes to (B, F, ...) so SmplxLite behaves consistently across outputs.
         if body_pose.ndim == 2:
             body_pose = body_pose[None, ...]
         if global_orient.ndim == 2:
             global_orient = global_orient[None, ...]
-        if transl.ndim == 2:
+        if transl is not None and transl.ndim == 2:
             transl = transl[None, ...]
+
         if betas.ndim == 1:
             betas = betas[None, ...]
+        elif betas.ndim == 2:
+            # GVHMR commonly stores betas per-frame as (F, 10). Wrap to (1, F, 10).
+            if betas.shape[0] != body_pose.shape[0]:
+                betas = betas[None, ...]
+
+        B = int(body_pose.shape[0])
+        F = int(body_pose.shape[1])
+        if transl is None:
+            transl = torch.zeros((B, F, 3), dtype=torch.float32)
 
         # Some outputs store betas per-frame; slice if needed.
         if betas.ndim == 3 and betas.shape[1] >= int(frame_ids.max(initial=0) + 1):
@@ -610,13 +616,19 @@ def _render_gvhmr_global_preview(
         joints_global_smpl24 = model_smpl24(bp_g.to(device), be_g.to(device), go_g.to(device), tr_g.to(device)).squeeze(0)
         verts_global = model_mesh(bp_g.to(device), be_g.to(device), go_g.to(device), tr_g.to(device)).squeeze(0)
 
+    debug: dict[str, Any] = {}
+
     # === Normalize + face-Z transform for global view (approx GVHMR `move_to_start_point_face_z`) ===
-    # Ground the body using joints, not vertices. Vertex mins can contain outliers that push the
-    # estimated floor far below the true ground, causing the body to float above the checkerboard.
-    #
-    # Joints are far more stable: the minimum joint height per frame should be near the feet.
+    # We estimate a stable "floor" height from joints. We intentionally prefer a low percentile so
+    # we do not push the body down into the ground. Then, after the transform, we clamp away any
+    # remaining floating (never shift up).
     min_y_per_frame = joints_global_smpl24[..., 1].amin(dim=1).detach().cpu().numpy()
-    floor_y = float(np.percentile(min_y_per_frame, 10))
+    floor_y_p10 = float(np.percentile(min_y_per_frame, 10))
+    floor_y_p50 = float(np.percentile(min_y_per_frame, 50))
+    floor_y = float(floor_y_p10)
+    debug["floor_y_joints_p10_before_T"] = float(floor_y_p10)
+    debug["floor_y_joints_p50_before_T"] = float(floor_y_p50)
+    debug["floor_y_before_T"] = float(floor_y)
 
     offset = joints_global_smpl24[0, 0].detach().clone()
     offset[1] = floor_y
@@ -628,39 +640,36 @@ def _render_gvhmr_global_preview(
     joints_global_smpl24 = apply_T_on_points(joints_global_smpl24, T_seq)
     verts_global = apply_T_on_points(verts_global, T_seq)
 
-    # Re-level after the global transform, in case it introduces a small vertical drift.
+    # Re-level after the global transform by shifting down only if we are floating.
     min_y_per_frame2 = joints_global_smpl24[..., 1].amin(dim=1).detach().cpu().numpy()
-    floor_y2 = float(np.percentile(min_y_per_frame2, 10))
-    joints_global_smpl24[..., 1] = joints_global_smpl24[..., 1] - float(floor_y2)
-    verts_global[..., 1] = verts_global[..., 1] - float(floor_y2)
+    floor_y2_p10 = float(np.percentile(min_y_per_frame2, 10))
+    floor_y2_p50 = float(np.percentile(min_y_per_frame2, 50))
+    debug["floor_y_joints_p10_after_T"] = float(floor_y2_p10)
+    debug["floor_y_joints_p50_after_T"] = float(floor_y2_p50)
+    if floor_y2_p10 > 0:
+        joints_global_smpl24[..., 1] = joints_global_smpl24[..., 1] - float(floor_y2_p10)
+        verts_global[..., 1] = verts_global[..., 1] - float(floor_y2_p10)
+        debug["post_T_shift_down"] = float(floor_y2_p10)
+    else:
+        debug["post_T_shift_down"] = 0.0
 
-    # === Static global camera (similar to GVHMR `get_global_cameras_static`) ===
-    targets = joints_global_smpl24.mean(dim=1).detach().cpu()  # (F, 3)
+    # Final vertical range diagnostics (helps debug "floating above ground" issues).
+    debug["joints_y_min_final"] = float(joints_global_smpl24[..., 1].min().item())
+    debug["joints_y_max_final"] = float(joints_global_smpl24[..., 1].max().item())
+    debug["verts_y_min_final"] = float(verts_global[..., 1].min().item())
+    debug["verts_y_max_final"] = float(verts_global[..., 1].max().item())
+
+    # === Static global camera (match GVHMR `get_global_cameras_static`) ===
+    targets = verts_global.mean(dim=1).detach().cpu()  # (F, 3)
     targets[:, 1] = 0.0
     target_center = targets.mean(dim=0)  # (3,)
     target_scale = torch.norm(targets - target_center[None, :], dim=-1).max()
-    target_scale_val = float(max(target_scale.item(), 1.0)) * 2.0  # beta=2.0 (GVHMR default)
-
-    # Fit the camera distance to the motion radius so the subject stays in-frame.
-    fx = float(K_global[0, 0].item())
-    fy = float(K_global[1, 1].item())
-    fov_x = 2.0 * math.atan((float(panel_w) * 0.5) / max(fx, 1e-6))
-    fov_y = 2.0 * math.atan((float(panel_h) * 0.5) / max(fy, 1e-6))
-    fov = float(min(fov_x, fov_y))
-    joints_cpu = joints_global_smpl24.detach().cpu().reshape(-1, 3)
-    radius = torch.norm(joints_cpu - target_center[None, :], dim=-1).max()
-    # Distance required so that the bounding sphere roughly fits the view frustum.
-    dist_fit = float(radius.item()) / max(math.tan(fov * 0.5), 1e-3) * 1.25
-    cam_dist = float(max(target_scale_val, dist_fit))
+    cam_dist = float(max(target_scale.item(), 1.0)) * 2.0  # beta=2.0 (GVHMR default)
 
     vec_rad = float(math.radians(float(yaw_deg)))
     vec = torch.tensor([math.sin(vec_rad), 0.0, math.cos(vec_rad)], dtype=torch.float32)
     vec = vec / torch.norm(vec)
-    # Aim at the body center (based on joints, which are robust) so the subject stays centered.
-    body_y_min = float(joints_global_smpl24[..., 1].min().item())
-    body_y_max = float(joints_global_smpl24[..., 1].max().item())
-    body_h = float(max(body_y_max - body_y_min, 1.0))
-    target_y = float(body_y_min + body_h * 0.55)
+    target_center_height = 1.0
 
     def _look_at_world_to_cam(pos: torch.Tensor, at: torch.Tensor, up_vec: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         # Returns (R, t) such that p_cam = p_world @ R.T + t
@@ -676,60 +685,16 @@ def _render_gvhmr_global_preview(
 
     up = torch.tensor([0.0, 1.0, 0.0], dtype=torch.float32)
 
-    def _camera_for_dist(dist: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        pos = target_center + vec * float(dist)
-        pos[1] = float(dist) * float(math.tan(math.radians(20.0))) + target_y  # cam_height_degree=20
-        at = target_center.clone()
-        at[1] = target_y
-        R, t = _look_at_world_to_cam(pos, at, up)
-        return pos, at, R, t
-
-    # Tighten framing using a few iterations on the projected joints bbox.
-    # This keeps global views from looking "tiny" when motion is mostly in-place.
-    if joints_global_smpl24.shape[0] > 0:
-        sample_ids = np.linspace(
-            0,
-            int(joints_global_smpl24.shape[0]) - 1,
-            num=int(min(7, joints_global_smpl24.shape[0])),
-            dtype=np.int32,
-        )
-        K_cpu = K_global.detach().cpu()
-        jw = joints_global_smpl24.detach().cpu()
-        target_w = float(panel_w) * 0.62
-        target_h = float(panel_h) * 0.78
-        for _ in range(4):
-            _, _, R_tmp, t_tmp = _camera_for_dist(cam_dist)
-            # Project joints for a few sampled frames.
-            uvs: list[np.ndarray] = []
-            for sid in sample_ids:
-                pc = torch.matmul(jw[int(sid)], R_tmp.T) + t_tmp  # (J, 3)
-                valid = pc[:, 2] > 1e-3
-                if not bool(valid.any()):
-                    continue
-                uv = _project_pinhole(pc[valid], K_cpu).detach().cpu().numpy()
-                if uv.size:
-                    uvs.append(uv)
-            if not uvs:
-                break
-            all_uv = np.concatenate(uvs, axis=0)
-            if not np.all(np.isfinite(all_uv)):
-                all_uv = all_uv[np.isfinite(all_uv).all(axis=1)]
-            if all_uv.shape[0] < 8:
-                break
-            u0, v0 = np.percentile(all_uv, 2, axis=0)
-            u1, v1 = np.percentile(all_uv, 98, axis=0)
-            bw = float(max(u1 - u0, 1.0))
-            bh = float(max(v1 - v0, 1.0))
-            scale = min(target_w / bw, target_h / bh)
-            if not (scale > 0):
-                break
-            # If we're already within 10 percent of target, stop.
-            if 0.9 <= scale <= 1.1:
-                break
-            cam_dist = float(cam_dist / max(scale, 1e-3))
-            cam_dist = float(max(cam_dist, 1.0))
-
-    cam_pos, cam_target, R_wc, t_wc = _camera_for_dist(cam_dist)
+    cam_pos = target_center + vec * float(cam_dist)
+    cam_pos[1] = float(cam_dist) * float(math.tan(math.radians(20.0))) + float(target_center_height)
+    cam_target = target_center.clone()
+    cam_target[1] = float(target_center_height)
+    R_wc, t_wc = _look_at_world_to_cam(cam_pos, cam_target, up)
+    debug["cam_dist"] = float(cam_dist)
+    debug["cam_pos"] = [float(x) for x in cam_pos.detach().cpu().tolist()]
+    debug["cam_target"] = [float(x) for x in cam_target.detach().cpu().tolist()]
+    debug["target_center"] = [float(x) for x in target_center.detach().cpu().tolist()]
+    debug["target_center_height"] = float(target_center_height)
 
     def _project_global(points_world: torch.Tensor) -> torch.Tensor:
         pw = points_world.detach().cpu()
@@ -740,7 +705,7 @@ def _render_gvhmr_global_preview(
     root_points = joints_global_smpl24[:, 0, :].detach().cpu().numpy()
     cx = float((root_points[:, 0].max() + root_points[:, 0].min()) * 0.5)
     cz = float((root_points[:, 2].max() + root_points[:, 2].min()) * 0.5)
-    all_pts = joints_global_smpl24.detach().cpu().numpy().reshape(-1, 3)
+    all_pts = verts_global.detach().cpu().numpy().reshape(-1, 3)
     scale_x = float(all_pts[:, 0].max() - all_pts[:, 0].min())
     scale_z = float(all_pts[:, 2].max() - all_pts[:, 2].min())
     grid_scale = max(scale_x, scale_z, 1.0) * 1.5
@@ -878,6 +843,7 @@ def _render_gvhmr_global_preview(
         "frames_out": int(frame_ids.shape[0]),
         "layout": "global_meshlike",
         "yaw_deg": float(yaw_deg),
+        "debug": debug,
     }
 
 
@@ -1215,28 +1181,38 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
     # - global front + side
     # so the Web UI can offer the same camera toggles on Pegasus and Windows.
     render_errors: dict[str, str] = {}
+    fallback_render_debug: dict[str, Any] = {}
 
     if not rendered_global.exists():
         try:
-            _render_gvhmr_global_preview(video_path, results_path, rendered_global, yaw_deg=45.0)
+            out = _render_gvhmr_global_preview(video_path, results_path, rendered_global, yaw_deg=45.0)
+            fallback_render_debug["global45"] = out.get("debug", None)
         except Exception as exc:  # noqa: BLE001
             render_errors["global45"] = f"{type(exc).__name__}: {exc}"
 
     if not rendered_global_front.exists():
         try:
-            _render_gvhmr_global_preview(video_path, results_path, rendered_global_front, yaw_deg=0.0)
+            out = _render_gvhmr_global_preview(video_path, results_path, rendered_global_front, yaw_deg=0.0)
+            fallback_render_debug["global_front"] = out.get("debug", None)
         except Exception as exc:  # noqa: BLE001
             render_errors["global_front"] = f"{type(exc).__name__}: {exc}"
 
     if not rendered_global_side.exists():
         try:
-            _render_gvhmr_global_preview(video_path, results_path, rendered_global_side, yaw_deg=90.0)
+            out = _render_gvhmr_global_preview(video_path, results_path, rendered_global_side, yaw_deg=90.0)
+            fallback_render_debug["global_side"] = out.get("debug", None)
         except Exception as exc:  # noqa: BLE001
             render_errors["global_side"] = f"{type(exc).__name__}: {exc}"
 
     if not rendered_incam.exists():
         try:
-            _render_gvhmr_incam_overlay(video_path, results_path, rendered_incam)
+            out = _render_gvhmr_incam_overlay(video_path, results_path, rendered_incam)
+            fallback_render_debug["incam_overlay"] = {
+                "ok": bool(out.get("ok", True)),
+                "stride": out.get("stride", None),
+                "frames_out": out.get("frames_out", None),
+                "fps_out": out.get("fps_out", None),
+            }
         except Exception as exc:  # noqa: BLE001
             render_errors["incam"] = f"{type(exc).__name__}: {exc}"
 
@@ -1252,7 +1228,9 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
     else:
         # Last-resort fallback to ensure the UI never shows an empty preview panel.
         try:
-            _render_gvhmr_global_preview(video_path, results_path, preview_path, yaw_deg=45.0)
+            out = _render_gvhmr_global_preview(video_path, results_path, preview_path, yaw_deg=45.0)
+            if "global45" not in fallback_render_debug:
+                fallback_render_debug["global45"] = out.get("debug", None)
             if preview_path.exists():
                 preview = {
                     "ok": True,
@@ -1294,6 +1272,7 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         "preview_mp4": str(preview_path) if preview_path.exists() else None,
         "preview_error": preview_error,
         "fallback_render_errors": render_errors if render_errors else None,
+        "fallback_render_debug": fallback_render_debug if fallback_render_debug else None,
         "native_render": bool(enable_native_render),
         "native_render_global_mp4": str(rendered_global) if rendered_global.exists() else None,
         "native_render_incam_mp4": str(rendered_incam) if rendered_incam.exists() else None,
