@@ -21,6 +21,9 @@ set -euo pipefail
 # - SLURM_PARTITION (default: RTXA6000)
 # - SLURM_TIME (default: 12:00:00)
 # - SLURM_GRES (default: gpu:1)
+# - SLURM_NODELIST (optional, for example serv-9218)
+# - SLURM_EXCLUDE (optional, for example serv-9217)
+# - SLURM_REQUEUE (default: 1, submit job as requeueable)
 # - SLURM_CPUS_PER_TASK (optional)
 # - SLURM_MEM (optional, for example 32G)
 # - CONTROL_PLANE_MODE (default: auto, options: auto|pegasus|mac)
@@ -59,6 +62,9 @@ HAN_WORKER_CONCURRENCY="${HAN_WORKER_CONCURRENCY:-1}"
 SLURM_PARTITION="${SLURM_PARTITION:-RTXA6000}"
 SLURM_TIME="${SLURM_TIME:-12:00:00}"
 SLURM_GRES="${SLURM_GRES:-gpu:1}"
+SLURM_NODELIST="${SLURM_NODELIST:-}"
+SLURM_EXCLUDE="${SLURM_EXCLUDE:-}"
+SLURM_REQUEUE="${SLURM_REQUEUE:-1}"
 SLURM_CPUS_PER_TASK="${SLURM_CPUS_PER_TASK:-}"
 SLURM_MEM="${SLURM_MEM:-}"
 CONTROL_PLANE_MODE="${CONTROL_PLANE_MODE:-auto}"
@@ -297,6 +303,28 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 source "$1"
+
+# Basic GPU health check: some Pegasus nodes occasionally have broken NVML/CUDA,
+# which causes GVHMR's demo render to fail with "CUDA unknown error".
+if [[ "${HAN_WORKER_QUEUES:-}" == *"pose"* || "${HAN_WORKER_ROLE:-}" == "pose" ]]; then
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    if ! nvidia-smi -L >/dev/null 2>&1; then
+      echo "[ERROR] GPU health check failed (nvidia-smi). Node GPU appears unhealthy." >&2
+      if [[ -n "${SLURM_JOB_ID:-}" ]] && command -v scontrol >/dev/null 2>&1; then
+        max_requeues="${HAN_SLURM_MAX_REQUEUES:-3}"
+        restart_count="${SLURM_RESTART_COUNT:-0}"
+        if [[ "$restart_count" =~ ^[0-9]+$ && "$max_requeues" =~ ^[0-9]+$ && "$restart_count" -lt "$max_requeues" ]]; then
+          echo "[INFO] Requeuing Slurm job id=$SLURM_JOB_ID (restart_count=$restart_count, max=$max_requeues)." >&2
+          scontrol requeue "$SLURM_JOB_ID" || true
+        else
+          echo "[WARN] Not requeuing (restart_count=$restart_count, max=$max_requeues)." >&2
+        fi
+      fi
+      exit 1
+    fi
+  fi
+fi
+
 bash "$2/scripts/linux/run_worker.sh"
 EOF
   chmod +x "$batch_file"
@@ -311,11 +339,20 @@ EOF
     --error "$err_log"
   )
 
+  if [[ "$SLURM_REQUEUE" == "1" ]]; then
+    sbatch_args+=(--requeue)
+  fi
   if [[ -n "$slurm_cpus_per_task" ]]; then
     sbatch_args+=(--cpus-per-task "$slurm_cpus_per_task")
   fi
   if [[ -n "$slurm_mem" ]]; then
     sbatch_args+=(--mem "$slurm_mem")
+  fi
+  if [[ -n "$SLURM_NODELIST" ]]; then
+    sbatch_args+=(--nodelist "$SLURM_NODELIST")
+  fi
+  if [[ -n "$SLURM_EXCLUDE" ]]; then
+    sbatch_args+=(--exclude "$SLURM_EXCLUDE")
   fi
 
   job_id="$(sbatch "${sbatch_args[@]}" "$batch_file" "$env_file" "$remote_repo")"
