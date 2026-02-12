@@ -48,7 +48,7 @@ PULL_REPO="${PULL_REPO:-1}"
 INSTALL_REQS="${INSTALL_REQS:-0}"
 PEGASUS_LAUNCH_MODE="${PEGASUS_LAUNCH_MODE:-auto}"
 
-HAN_PYTHON_BIN="${HAN_PYTHON_BIN:-python3}"
+HAN_PYTHON_BIN="${HAN_PYTHON_BIN:-}"
 HAN_WORKER_QUEUES="${HAN_WORKER_QUEUES:-pose}"
 HAN_WORKER_POOL="${HAN_WORKER_POOL:-solo}"
 HAN_WORKER_CONCURRENCY="${HAN_WORKER_CONCURRENCY:-1}"
@@ -112,6 +112,11 @@ else
 fi
 echo "Remote repo:  $PEGASUS_REPO"
 echo "Queues:       $HAN_WORKER_QUEUES"
+if [[ -n "$HAN_PYTHON_BIN" ]]; then
+  echo "Python bin:   $HAN_PYTHON_BIN"
+else
+  echo "Python bin:   <auto (repo .venv preferred)>"
+fi
 echo "Launch mode:  $PEGASUS_LAUNCH_MODE"
 if [[ "$PEGASUS_LAUNCH_MODE" != "local" ]]; then
   echo "Partition:    $SLURM_PARTITION"
