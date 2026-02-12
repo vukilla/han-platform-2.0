@@ -30,6 +30,7 @@ build/
 
 # Local artifacts
 tmp/
+.tmp/
 *.log
 *.sqlite
 

@@ -1108,10 +1108,15 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         env.setdefault("GVHMR_RENDER_INCAM", "1")
         # Render extra global views (front/side) so the Studio UI can offer a view toggle.
         env.setdefault("GVHMR_RENDER_EXTRA_VIEWS", "1")
-        # Prevent coarse-rasterizer bin overflow artifacts (black/flicker frames) in global views.
-        # `bin_size=0` uses naive rasterization, which is slower but stable for preview generation.
-        env.setdefault("GVHMR_P3D_BIN_SIZE", "0")
-        env.setdefault("GVHMR_P3D_MAX_FACES_PER_BIN", "1000000")
+        # PyTorch3D's coarse rasterizer can overflow its per-bin face budget, which shows up as
+        # missing/black fragments in the rendered mesh. Increase the budget, but keep coarse
+        # rasterization enabled for speed.
+        #
+        # If you see "Bin size was too small..." warnings or black flicker frames again, set:
+        #   GVHMR_P3D_BIN_SIZE=0
+        # to force naive rasterization (slower, but very robust).
+        env.setdefault("GVHMR_P3D_BIN_SIZE", "64")
+        env.setdefault("GVHMR_P3D_MAX_FACES_PER_BIN", "50000")
 
     # GVHMR's demo script uses ffmpeg-python which shells out to a binary named `ffmpeg`.
     # Some environments (notably Pegasus compute nodes) do not have a system ffmpeg on PATH.
