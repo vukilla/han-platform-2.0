@@ -1,61 +1,83 @@
 # Pegasus + Windows Dual Worker Setup
 
-This runbook adds a second worker host (Pegasus) so you can run motion recovery while your home gaming PC is off, while still keeping the Windows path available.
+This setup makes Pegasus the primary runtime path (private control-plane + pose worker), while keeping Windows available as fallback.
 
 ## Goal
-- Keep current Windows worker path as fallback.
-- Add a remote Linux worker path for `pose` queue jobs.
-- Avoid breaking current local flow.
+- Primary: Pegasus private control-plane and Pegasus pose worker.
+- Fallback 1: Mac control-plane when Pegasus control-plane is unavailable.
+- Fallback 2: Windows worker for Windows-only workloads.
 
 ## Current limitation
 - `isaaclab_teacher_ppo` is still Windows-only in `apps/api/app/worker.py`.
-- Result: training jobs on the `gpu` queue still need the Windows GPU worker unless that backend is ported.
+- Training jobs on the `gpu` queue still require the Windows GPU worker unless that backend is ported.
 
-## Step 1, choose control-plane location
-- Recommended: move API + Redis + Postgres + object storage to an always-on host.
-- Temporary fallback: keep Mac as control-plane and point Pegasus worker back to Mac LAN IP, this still requires home network reachability.
-
-## Step 2, prepare Pegasus repo and Python
-On Pegasus:
-
-```bash
-git clone https://github.com/vukilla/han-platform.git ~/han-platform
-cd ~/han-platform
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r apps/api/requirements.worker.txt
-```
-
-If your worker will run GVHMR pose recovery, install the extra GVHMR dependencies in the same environment as well.
-
-## Step 3, start Pegasus worker from Mac over SSH
+## Step 1, bootstrap Pegasus control-plane dependencies (one-time)
 From your Mac repo:
 
 ```bash
 export PEGASUS_HOST=dfki
 export SSH_KEY=~/.ssh/dfki_pegasus
+./scripts/mac/bootstrap_pegasus_control_plane_ssh.sh
+```
 
-# Point to your always-on control-plane endpoints.
-export REDIS_URL=redis://<CONTROL_PLANE_HOST>:6379/0
-export DATABASE_URL=postgresql+psycopg://han:han@<CONTROL_PLANE_HOST>:5432/han
-export S3_ENDPOINT=http://<CONTROL_PLANE_HOST>:9000
-export S3_ACCESS_KEY=minioadmin
-export S3_SECRET_KEY=minioadmin
-export S3_BUCKET=humanoid-network-dev
+This installs a user-space conda environment on Pegasus with:
+- `postgresql`
+- `redis-server`
+- `minio-server`
+- Python API dependencies
 
-# Pose only by default.
+## Step 2, start Pegasus private control-plane
+From your Mac repo:
+
+```bash
+export PEGASUS_HOST=dfki
+export SSH_KEY=~/.ssh/dfki_pegasus
+export SLURM_PARTITION=batch
+export SLURM_TIME=12:00:00
+./scripts/mac/start_pegasus_control_plane_ssh.sh
+```
+
+Status:
+
+```bash
+./scripts/mac/status_pegasus_control_plane_ssh.sh
+```
+
+Tail logs:
+
+```bash
+./scripts/mac/tail_pegasus_control_plane_logs_ssh.sh
+```
+
+Stop:
+
+```bash
+./scripts/mac/stop_pegasus_control_plane_ssh.sh
+```
+
+## Step 3, start Pegasus pose worker with automatic control-plane fallback
+From your Mac repo:
+
+```bash
+export PEGASUS_HOST=dfki
+export SSH_KEY=~/.ssh/dfki_pegasus
 export HAN_WORKER_QUEUES=pose
-
-# Slurm defaults for testing.
 export PEGASUS_LAUNCH_MODE=slurm
 export SLURM_PARTITION=RTXA6000
 export SLURM_TIME=12:00:00
 
+# auto: use Pegasus control-plane endpoints if available, otherwise fallback to Mac LAN.
+export CONTROL_PLANE_MODE=auto
+
 ./scripts/mac/start_pegasus_worker_ssh.sh
 ```
 
-Tail logs:
+Mode behavior:
+- `CONTROL_PLANE_MODE=pegasus`: requires Pegasus control-plane endpoints file, hard-fails if missing.
+- `CONTROL_PLANE_MODE=mac`: always use Mac LAN endpoints.
+- `CONTROL_PLANE_MODE=auto`: Pegasus first, then Mac fallback.
+
+Worker logs:
 
 ```bash
 ./scripts/mac/tail_pegasus_worker_logs_ssh.sh
@@ -67,7 +89,7 @@ Stop worker:
 ./scripts/mac/stop_pegasus_worker_ssh.sh
 ```
 
-## Step 4, keep Windows worker as fallback
+## Step 4, keep Windows worker fallback
 No change needed for your current Windows path:
 
 ```powershell
@@ -81,17 +103,16 @@ WINDOWS_GPU_IP=<windows_ip> ./scripts/mac/start_windows_gpu_worker_ssh.sh
 ```
 
 ## Step 5, validate failover
-Run these checks before cutover:
+1. Pegasus control-plane + Pegasus pose worker on, Windows off:
+   run a `pose` job.
+2. Stop Pegasus pose worker, start Windows pose worker:
+   run the same `pose` job.
+3. Stop Pegasus control-plane and re-run Pegasus worker with `CONTROL_PLANE_MODE=auto`:
+   verify Mac fallback is used.
+4. Submit a training job:
+   verify it still routes to Windows `gpu` worker.
 
-1. Pegasus on, Windows off, run a `pose` job.
-2. Pegasus off, Windows on, run the same `pose` job.
-3. Both on, run multiple jobs and confirm stable queue processing.
-4. Submit one training job, confirm it still routes to Windows `gpu` worker.
-5. Verify worker status via `http://localhost:8000/ops/workers?timeout=2.0` (or your deployed API URL).
-
-## Step 6, production hardening (recommended)
-- Move control-plane services off local laptop.
-- Use TLS for API and object storage.
-- Replace default MinIO credentials.
-- Restrict worker host ingress with firewall rules.
-- Run worker as a managed service (systemd or supervisor), instead of ad-hoc nohup.
+## Step 6, hardening
+- Replace default `minioadmin` credentials.
+- Keep Pegasus control-plane private, no public Redis/Postgres ports.
+- Use short-lived SSH sessions only for control operations.

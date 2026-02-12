@@ -23,6 +23,9 @@ set -euo pipefail
 # - SLURM_GRES (default: gpu:1)
 # - SLURM_CPUS_PER_TASK (optional)
 # - SLURM_MEM (optional, for example 32G)
+# - CONTROL_PLANE_MODE (default: auto, options: auto|pegasus|mac)
+# - CP_ENDPOINTS_FILE (default: ~/han-platform/tmp/pegasus_control_plane/endpoints.env)
+# - MAC_LAN_IP (optional explicit fallback IP when CONTROL_PLANE_MODE uses mac)
 # - REDIS_URL / DATABASE_URL / S3_ENDPOINT / S3_ACCESS_KEY / S3_SECRET_KEY / S3_BUCKET
 # - S3_REGION (default: us-east-1)
 # - S3_SECURE (default: false)
@@ -58,16 +61,66 @@ SLURM_TIME="${SLURM_TIME:-12:00:00}"
 SLURM_GRES="${SLURM_GRES:-gpu:1}"
 SLURM_CPUS_PER_TASK="${SLURM_CPUS_PER_TASK:-}"
 SLURM_MEM="${SLURM_MEM:-}"
+CONTROL_PLANE_MODE="${CONTROL_PLANE_MODE:-auto}"
+CP_ENDPOINTS_FILE="${CP_ENDPOINTS_FILE:-$PEGASUS_REPO/tmp/pegasus_control_plane/endpoints.env}"
+
+if [[ "$CONTROL_PLANE_MODE" != "auto" && "$CONTROL_PLANE_MODE" != "pegasus" && "$CONTROL_PLANE_MODE" != "mac" ]]; then
+  echo "[ERROR] Invalid CONTROL_PLANE_MODE=$CONTROL_PLANE_MODE (expected auto|pegasus|mac)." >&2
+  exit 1
+fi
+
+ssh_target="$PEGASUS_HOST"
+if [[ -n "$SSH_USER" && "$ssh_target" != *@* ]]; then
+  ssh_target="${SSH_USER}@${ssh_target}"
+fi
+
+ssh_cmd=(ssh)
+if [[ -n "$SSH_KEY" ]]; then
+  ssh_cmd+=(-i "$SSH_KEY" -o IdentitiesOnly=yes -o PreferredAuthentications=publickey)
+fi
+
+resolved_control_plane="explicit-env"
 
 if [[ -z "${REDIS_URL:-}" || -z "${DATABASE_URL:-}" || -z "${S3_ENDPOINT:-}" ]]; then
-  mac_ip="${MAC_LAN_IP:-$(ipconfig getifaddr en0 || true)}"
-  if [[ -z "$mac_ip" ]]; then
-    mac_ip="$(ipconfig getifaddr en1 || true)"
+  if [[ "$CONTROL_PLANE_MODE" == "auto" || "$CONTROL_PLANE_MODE" == "pegasus" ]]; then
+    remote_cp_env="$("${ssh_cmd[@]}" "$ssh_target" "if [ -f $CP_ENDPOINTS_FILE ]; then cat $CP_ENDPOINTS_FILE; fi" || true)"
+    if [[ -n "$remote_cp_env" ]]; then
+      while IFS='=' read -r key value; do
+        [[ -z "${key:-}" || "${key:0:1}" == "#" ]] && continue
+        value="${value//$'\r'/}"
+        case "$key" in
+          REDIS_URL) REDIS_URL="${REDIS_URL:-$value}" ;;
+          DATABASE_URL) DATABASE_URL="${DATABASE_URL:-$value}" ;;
+          S3_ENDPOINT) S3_ENDPOINT="${S3_ENDPOINT:-$value}" ;;
+          S3_PUBLIC_ENDPOINT) S3_PUBLIC_ENDPOINT="${S3_PUBLIC_ENDPOINT:-$value}" ;;
+          S3_ACCESS_KEY) S3_ACCESS_KEY="${S3_ACCESS_KEY:-$value}" ;;
+          S3_SECRET_KEY) S3_SECRET_KEY="${S3_SECRET_KEY:-$value}" ;;
+          S3_BUCKET) S3_BUCKET="${S3_BUCKET:-$value}" ;;
+          S3_REGION) S3_REGION="${S3_REGION:-$value}" ;;
+          S3_SECURE) S3_SECURE="${S3_SECURE:-$value}" ;;
+        esac
+      done <<<"$remote_cp_env"
+      if [[ -n "${REDIS_URL:-}" && -n "${DATABASE_URL:-}" && -n "${S3_ENDPOINT:-}" ]]; then
+        resolved_control_plane="pegasus"
+      fi
+    fi
   fi
-  if [[ -n "$mac_ip" ]]; then
-    REDIS_URL="${REDIS_URL:-redis://${mac_ip}:6379/0}"
-    DATABASE_URL="${DATABASE_URL:-postgresql+psycopg://han:han@${mac_ip}:5432/han}"
-    S3_ENDPOINT="${S3_ENDPOINT:-http://${mac_ip}:9000}"
+
+  if [[ -z "${REDIS_URL:-}" || -z "${DATABASE_URL:-}" || -z "${S3_ENDPOINT:-}" ]]; then
+    if [[ "$CONTROL_PLANE_MODE" == "pegasus" ]]; then
+      echo "[ERROR] CONTROL_PLANE_MODE=pegasus but no Pegasus endpoints found at: $CP_ENDPOINTS_FILE" >&2
+      exit 1
+    fi
+    mac_ip="${MAC_LAN_IP:-$(ipconfig getifaddr en0 || true)}"
+    if [[ -z "$mac_ip" ]]; then
+      mac_ip="$(ipconfig getifaddr en1 || true)"
+    fi
+    if [[ -n "$mac_ip" ]]; then
+      REDIS_URL="${REDIS_URL:-redis://${mac_ip}:6379/0}"
+      DATABASE_URL="${DATABASE_URL:-postgresql+psycopg://han:han@${mac_ip}:5432/han}"
+      S3_ENDPOINT="${S3_ENDPOINT:-http://${mac_ip}:9000}"
+      resolved_control_plane="mac"
+    fi
   fi
 fi
 
@@ -112,6 +165,7 @@ else
 fi
 echo "Remote repo:  $PEGASUS_REPO"
 echo "Queues:       $HAN_WORKER_QUEUES"
+echo "Control plane:$resolved_control_plane (mode=$CONTROL_PLANE_MODE)"
 if [[ -n "$HAN_PYTHON_BIN" ]]; then
   echo "Python bin:   $HAN_PYTHON_BIN"
 else
@@ -125,16 +179,6 @@ fi
 echo "Log out:      $OUT_LOG"
 echo "Log err:      $ERR_LOG"
 echo ""
-
-ssh_target="$PEGASUS_HOST"
-if [[ -n "$SSH_USER" && "$ssh_target" != *@* ]]; then
-  ssh_target="${SSH_USER}@${ssh_target}"
-fi
-
-ssh_cmd=(ssh)
-if [[ -n "$SSH_KEY" ]]; then
-  ssh_cmd+=(-i "$SSH_KEY" -o IdentitiesOnly=yes -o PreferredAuthentications=publickey)
-fi
 
 "${ssh_cmd[@]}" "$ssh_target" \
   "bash -s -- $(printf '%q ' "$PEGASUS_REPO" "$PULL_REPO" "$INSTALL_REQS" "$PEGASUS_LAUNCH_MODE" "$SLURM_PARTITION" "$SLURM_TIME" "$SLURM_GRES" "$SLURM_CPUS_PER_TASK" "$SLURM_MEM" "$HAN_PYTHON_BIN" "$HAN_WORKER_QUEUES" "$HAN_WORKER_POOL" "$HAN_WORKER_CONCURRENCY" "$REDIS_URL" "$DATABASE_URL" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" "$S3_BUCKET" "$S3_REGION" "$S3_SECURE" "$GVHMR_NATIVE_RENDER" "$GVHMR_RENDER_DEVICE" "$GVHMR_RENDER_INCAM" "$GVHMR_RENDER_EXTRA_VIEWS" "$PID_FILE" "$JOB_ID_FILE" "$OUT_LOG" "$ERR_LOG")" <<'REMOTE'

@@ -36,6 +36,11 @@ Start here:
 ## Dual Worker Setup (Pegasus + Windows fallback)
 If you want motion recovery available while your home gaming PC is off, add a Pegasus worker and keep Windows as fallback:
 - `docs/PEGASUS_DUAL_WORKER_SETUP.md`
+- `scripts/mac/bootstrap_pegasus_control_plane_ssh.sh`
+- `scripts/mac/start_pegasus_control_plane_ssh.sh`
+- `scripts/mac/status_pegasus_control_plane_ssh.sh`
+- `scripts/mac/stop_pegasus_control_plane_ssh.sh`
+- `scripts/mac/tail_pegasus_control_plane_logs_ssh.sh`
 - `scripts/mac/start_pegasus_worker_ssh.sh`
 - `scripts/mac/stop_pegasus_worker_ssh.sh`
 - `scripts/mac/tail_pegasus_worker_logs_ssh.sh`
