@@ -47,6 +47,11 @@ export S3_BUCKET=humanoid-network-dev
 # Pose only by default.
 export HAN_WORKER_QUEUES=pose
 
+# Slurm defaults for testing.
+export PEGASUS_LAUNCH_MODE=slurm
+export SLURM_PARTITION=RTXA6000
+export SLURM_TIME=12:00:00
+
 ./scripts/mac/start_pegasus_worker_ssh.sh
 ```
 

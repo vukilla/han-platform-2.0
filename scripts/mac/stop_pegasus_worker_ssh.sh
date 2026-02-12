@@ -22,6 +22,7 @@ if [[ -z "$SSH_KEY" && -f "$HOME/.ssh/dfki_pegasus" ]]; then
 fi
 PEGASUS_REPO="${PEGASUS_REPO:-~/han-platform}"
 PID_FILE="${PEGASUS_REPO}/tmp/pegasus_worker.pid"
+JOB_ID_FILE="${PEGASUS_REPO}/tmp/pegasus_worker.slurm_job_id"
 
 echo "== Stop Pegasus Worker over SSH =="
 echo "Pegasus host: $PEGASUS_HOST"
@@ -31,6 +32,7 @@ else
   echo "SSH user:     <from ssh config>"
 fi
 echo "PID file:     $PID_FILE"
+echo "Job ID file:  $JOB_ID_FILE"
 echo ""
 
 ssh_target="$PEGASUS_HOST"
@@ -43,13 +45,30 @@ if [[ -n "$SSH_KEY" ]]; then
   ssh_cmd+=(-i "$SSH_KEY" -o IdentitiesOnly=yes -o PreferredAuthentications=publickey)
 fi
 
-"${ssh_cmd[@]}" "$ssh_target" "bash -s -- $(printf '%q ' "$PID_FILE")" <<'REMOTE'
+"${ssh_cmd[@]}" "$ssh_target" "bash -s -- $(printf '%q ' "$PID_FILE" "$JOB_ID_FILE")" <<'REMOTE'
 set -euo pipefail
 
 pid_file="$1"
+job_id_file="$2"
+
+if [[ -f "$job_id_file" ]]; then
+  job_id="$(cat "$job_id_file" || true)"
+  if [[ -n "$job_id" ]]; then
+    if command -v scancel >/dev/null 2>&1; then
+      if scancel "$job_id" >/dev/null 2>&1; then
+        echo "Cancelled Slurm job id=$job_id"
+      else
+        echo "Slurm job id=$job_id was not active."
+      fi
+    else
+      echo "scancel not found on remote host, cannot cancel job id=$job_id"
+    fi
+  fi
+  rm -f "$job_id_file"
+fi
 
 if [[ ! -f "$pid_file" ]]; then
-  echo "No PID file found, worker is already stopped."
+  echo "No PID file found."
   exit 0
 fi
 

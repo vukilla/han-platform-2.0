@@ -13,10 +13,16 @@ set -euo pipefail
 # - PEGASUS_REPO (default: ~/han-platform)
 # - PULL_REPO (default: 1)
 # - INSTALL_REQS (default: 0)
+# - PEGASUS_LAUNCH_MODE (default: auto, options: auto|slurm|local)
 # - HAN_PYTHON_BIN (default: python3)
 # - HAN_WORKER_QUEUES (default: pose)
 # - HAN_WORKER_POOL (default: solo)
 # - HAN_WORKER_CONCURRENCY (default: 1)
+# - SLURM_PARTITION (default: RTXA6000)
+# - SLURM_TIME (default: 12:00:00)
+# - SLURM_GRES (default: gpu:1)
+# - SLURM_CPUS_PER_TASK (optional)
+# - SLURM_MEM (optional, for example 32G)
 # - REDIS_URL / DATABASE_URL / S3_ENDPOINT / S3_ACCESS_KEY / S3_SECRET_KEY / S3_BUCKET
 # - S3_REGION (default: us-east-1)
 # - S3_SECURE (default: false)
@@ -40,11 +46,18 @@ fi
 PEGASUS_REPO="${PEGASUS_REPO:-~/han-platform}"
 PULL_REPO="${PULL_REPO:-1}"
 INSTALL_REQS="${INSTALL_REQS:-0}"
+PEGASUS_LAUNCH_MODE="${PEGASUS_LAUNCH_MODE:-auto}"
 
 HAN_PYTHON_BIN="${HAN_PYTHON_BIN:-python3}"
 HAN_WORKER_QUEUES="${HAN_WORKER_QUEUES:-pose}"
 HAN_WORKER_POOL="${HAN_WORKER_POOL:-solo}"
 HAN_WORKER_CONCURRENCY="${HAN_WORKER_CONCURRENCY:-1}"
+
+SLURM_PARTITION="${SLURM_PARTITION:-RTXA6000}"
+SLURM_TIME="${SLURM_TIME:-12:00:00}"
+SLURM_GRES="${SLURM_GRES:-gpu:1}"
+SLURM_CPUS_PER_TASK="${SLURM_CPUS_PER_TASK:-}"
+SLURM_MEM="${SLURM_MEM:-}"
 
 if [[ -z "${REDIS_URL:-}" || -z "${DATABASE_URL:-}" || -z "${S3_ENDPOINT:-}" ]]; then
   mac_ip="${MAC_LAN_IP:-$(ipconfig getifaddr en0 || true)}"
@@ -80,6 +93,7 @@ for key in REDIS_URL DATABASE_URL S3_ENDPOINT S3_ACCESS_KEY S3_SECRET_KEY S3_BUC
 done
 
 PID_FILE="${PEGASUS_REPO}/tmp/pegasus_worker.pid"
+JOB_ID_FILE="${PEGASUS_REPO}/tmp/pegasus_worker.slurm_job_id"
 OUT_LOG="${PEGASUS_REPO}/tmp/pegasus_worker.out.log"
 ERR_LOG="${PEGASUS_REPO}/tmp/pegasus_worker.err.log"
 
@@ -98,6 +112,11 @@ else
 fi
 echo "Remote repo:  $PEGASUS_REPO"
 echo "Queues:       $HAN_WORKER_QUEUES"
+echo "Launch mode:  $PEGASUS_LAUNCH_MODE"
+if [[ "$PEGASUS_LAUNCH_MODE" != "local" ]]; then
+  echo "Partition:    $SLURM_PARTITION"
+  echo "Walltime:     $SLURM_TIME"
+fi
 echo "Log out:      $OUT_LOG"
 echo "Log err:      $ERR_LOG"
 echo ""
@@ -113,31 +132,38 @@ if [[ -n "$SSH_KEY" ]]; then
 fi
 
 "${ssh_cmd[@]}" "$ssh_target" \
-  "bash -s -- $(printf '%q ' "$PEGASUS_REPO" "$PULL_REPO" "$INSTALL_REQS" "$HAN_PYTHON_BIN" "$HAN_WORKER_QUEUES" "$HAN_WORKER_POOL" "$HAN_WORKER_CONCURRENCY" "$REDIS_URL" "$DATABASE_URL" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" "$S3_BUCKET" "$S3_REGION" "$S3_SECURE" "$GVHMR_NATIVE_RENDER" "$GVHMR_RENDER_DEVICE" "$GVHMR_RENDER_INCAM" "$GVHMR_RENDER_EXTRA_VIEWS" "$PID_FILE" "$OUT_LOG" "$ERR_LOG")" <<'REMOTE'
+  "bash -s -- $(printf '%q ' "$PEGASUS_REPO" "$PULL_REPO" "$INSTALL_REQS" "$PEGASUS_LAUNCH_MODE" "$SLURM_PARTITION" "$SLURM_TIME" "$SLURM_GRES" "$SLURM_CPUS_PER_TASK" "$SLURM_MEM" "$HAN_PYTHON_BIN" "$HAN_WORKER_QUEUES" "$HAN_WORKER_POOL" "$HAN_WORKER_CONCURRENCY" "$REDIS_URL" "$DATABASE_URL" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" "$S3_BUCKET" "$S3_REGION" "$S3_SECURE" "$GVHMR_NATIVE_RENDER" "$GVHMR_RENDER_DEVICE" "$GVHMR_RENDER_INCAM" "$GVHMR_RENDER_EXTRA_VIEWS" "$PID_FILE" "$JOB_ID_FILE" "$OUT_LOG" "$ERR_LOG")" <<'REMOTE'
 set -euo pipefail
 
 remote_repo="$1"
 pull_repo="$2"
 install_reqs="$3"
-python_bin="$4"
-worker_queues="$5"
-worker_pool="$6"
-worker_concurrency="$7"
-redis_url="$8"
-database_url="$9"
-s3_endpoint="${10}"
-s3_access_key="${11}"
-s3_secret_key="${12}"
-s3_bucket="${13}"
-s3_region="${14}"
-s3_secure="${15}"
-gvhmr_native_render="${16}"
-gvhmr_render_device="${17}"
-gvhmr_render_incam="${18}"
-gvhmr_render_extra_views="${19}"
-pid_file="${20}"
-out_log="${21}"
-err_log="${22}"
+launch_mode="$4"
+slurm_partition="$5"
+slurm_time="$6"
+slurm_gres="$7"
+slurm_cpus_per_task="$8"
+slurm_mem="$9"
+python_bin="${10}"
+worker_queues="${11}"
+worker_pool="${12}"
+worker_concurrency="${13}"
+redis_url="${14}"
+database_url="${15}"
+s3_endpoint="${16}"
+s3_access_key="${17}"
+s3_secret_key="${18}"
+s3_bucket="${19}"
+s3_region="${20}"
+s3_secure="${21}"
+gvhmr_native_render="${22}"
+gvhmr_render_device="${23}"
+gvhmr_render_incam="${24}"
+gvhmr_render_extra_views="${25}"
+pid_file="${26}"
+job_id_file="${27}"
+out_log="${28}"
+err_log="${29}"
 
 mkdir -p "$remote_repo/tmp"
 
@@ -145,10 +171,18 @@ if [[ "$pull_repo" == "1" ]]; then
   git -C "$remote_repo" pull --ff-only
 fi
 
+if [[ -f "$job_id_file" ]]; then
+  old_job_id="$(cat "$job_id_file" || true)"
+  if [[ -n "$old_job_id" ]] && command -v scancel >/dev/null 2>&1; then
+    scancel "$old_job_id" >/dev/null 2>&1 || true
+  fi
+  rm -f "$job_id_file"
+fi
+
 if [[ -f "$pid_file" ]]; then
   old_pid="$(cat "$pid_file" || true)"
   if [[ -n "$old_pid" ]] && kill -0 "$old_pid" >/dev/null 2>&1; then
-    kill "$old_pid" || true
+    kill "$old_pid" >/dev/null 2>&1 || true
     sleep 1
   fi
   rm -f "$pid_file"
@@ -173,20 +207,95 @@ export GVHMR_RENDER_DEVICE="$gvhmr_render_device"
 export GVHMR_RENDER_INCAM="$gvhmr_render_incam"
 export GVHMR_RENDER_EXTRA_VIEWS="$gvhmr_render_extra_views"
 
-nohup bash "$remote_repo/scripts/linux/run_worker.sh" >"$out_log" 2>"$err_log" < /dev/null &
-new_pid="$!"
-echo "$new_pid" > "$pid_file"
-sleep 2
-
-if ! kill -0 "$new_pid" >/dev/null 2>&1; then
-  echo "[ERROR] Worker failed to start. Inspect logs:"
-  echo "  $out_log"
-  echo "  $err_log"
-  exit 1
+if [[ "$launch_mode" == "auto" ]]; then
+  if command -v sbatch >/dev/null 2>&1; then
+    launch_mode="slurm"
+  else
+    launch_mode="local"
+  fi
 fi
 
-echo "Started Pegasus worker PID=$new_pid"
-echo "PID file: $pid_file"
-echo "Out log:  $out_log"
-echo "Err log:  $err_log"
+if [[ "$launch_mode" == "slurm" ]]; then
+  env_file="$remote_repo/tmp/pegasus_worker.env.sh"
+  batch_file="$remote_repo/tmp/pegasus_worker.sbatch"
+
+  sq() {
+    printf "%s" "$1" | sed "s/'/'\"'\"'/g"
+  }
+
+  cat >"$env_file" <<EOF
+export REDIS_URL='$(sq "$redis_url")'
+export DATABASE_URL='$(sq "$database_url")'
+export S3_ENDPOINT='$(sq "$s3_endpoint")'
+export S3_ACCESS_KEY='$(sq "$s3_access_key")'
+export S3_SECRET_KEY='$(sq "$s3_secret_key")'
+export S3_BUCKET='$(sq "$s3_bucket")'
+export S3_REGION='$(sq "$s3_region")'
+export S3_SECURE='$(sq "$s3_secure")'
+export HAN_PYTHON_BIN='$(sq "$python_bin")'
+export HAN_WORKER_QUEUES='$(sq "$worker_queues")'
+export HAN_WORKER_POOL='$(sq "$worker_pool")'
+export HAN_WORKER_CONCURRENCY='$(sq "$worker_concurrency")'
+export INSTALL_REQS='$(sq "$install_reqs")'
+export GVHMR_NATIVE_RENDER='$(sq "$gvhmr_native_render")'
+export GVHMR_RENDER_DEVICE='$(sq "$gvhmr_render_device")'
+export GVHMR_RENDER_INCAM='$(sq "$gvhmr_render_incam")'
+export GVHMR_RENDER_EXTRA_VIEWS='$(sq "$gvhmr_render_extra_views")'
+EOF
+
+  cat >"$batch_file" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+source "$1"
+bash "$2/scripts/linux/run_worker.sh"
+EOF
+  chmod +x "$batch_file"
+
+  sbatch_args=(
+    --parsable
+    --job-name "han-worker-${worker_queues//,/+}"
+    --partition "$slurm_partition"
+    --time "$slurm_time"
+    --gres "$slurm_gres"
+    --output "$out_log"
+    --error "$err_log"
+  )
+
+  if [[ -n "$slurm_cpus_per_task" ]]; then
+    sbatch_args+=(--cpus-per-task "$slurm_cpus_per_task")
+  fi
+  if [[ -n "$slurm_mem" ]]; then
+    sbatch_args+=(--mem "$slurm_mem")
+  fi
+
+  job_id="$(sbatch "${sbatch_args[@]}" "$batch_file" "$env_file" "$remote_repo")"
+  echo "$job_id" > "$job_id_file"
+  sleep 2
+  state="$(squeue -h -j "$job_id" -o '%T' 2>/dev/null || true)"
+  if [[ -z "$state" ]]; then
+    echo "[WARN] Submitted Slurm job $job_id but could not read state (it may have started/finished quickly)."
+  else
+    echo "Submitted Slurm worker job id=$job_id state=$state"
+  fi
+  echo "Job ID file: $job_id_file"
+  echo "Out log:     $out_log"
+  echo "Err log:     $err_log"
+else
+  nohup bash "$remote_repo/scripts/linux/run_worker.sh" >"$out_log" 2>"$err_log" < /dev/null &
+  new_pid="$!"
+  echo "$new_pid" > "$pid_file"
+  sleep 2
+
+  if ! kill -0 "$new_pid" >/dev/null 2>&1; then
+    echo "[ERROR] Worker failed to start. Inspect logs:"
+    echo "  $out_log"
+    echo "  $err_log"
+    exit 1
+  fi
+
+  echo "Started Pegasus worker PID=$new_pid"
+  echo "PID file: $pid_file"
+  echo "Out log:  $out_log"
+  echo "Err log:  $err_log"
+fi
 REMOTE

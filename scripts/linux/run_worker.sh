@@ -4,7 +4,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 API_DIR="$ROOT_DIR/apps/api"
 
-PYTHON_BIN="${HAN_PYTHON_BIN:-python3}"
+if [[ -n "${HAN_PYTHON_BIN:-}" ]]; then
+  PYTHON_BIN="$HAN_PYTHON_BIN"
+elif [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
+  PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
+else
+  PYTHON_BIN="python3"
+fi
 QUEUES="${HAN_WORKER_QUEUES:-pose}"
 POOL="${HAN_WORKER_POOL:-solo}"
 CONCURRENCY="${HAN_WORKER_CONCURRENCY:-1}"
