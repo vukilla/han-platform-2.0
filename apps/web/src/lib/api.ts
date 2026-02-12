@@ -1,4 +1,4 @@
-import { getToken } from "./auth";
+import { clearToken, getToken } from "./auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -16,6 +16,10 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   });
 
   if (!response.ok) {
+    if (response.status === 401) {
+      clearToken();
+      throw new Error("Session expired. Please sign in again.");
+    }
     const text = await response.text();
     throw new Error(text || response.statusText);
   }
@@ -60,6 +64,10 @@ export async function uploadGvhmrSmplxModel(file: File) {
     body: form,
   });
   if (!response.ok) {
+    if (response.status === 401) {
+      clearToken();
+      throw new Error("Session expired. Please sign in again.");
+    }
     const text = await response.text();
     throw new Error(text || response.statusText);
   }
@@ -122,6 +130,10 @@ export async function uploadDemoVideo(demoId: string, file: File) {
     body: form,
   });
   if (!response.ok) {
+    if (response.status === 401) {
+      clearToken();
+      throw new Error("Session expired. Please sign in again.");
+    }
     const text = await response.text();
     throw new Error(text || response.statusText);
   }

@@ -25,6 +25,8 @@ set -euo pipefail
 # - HAN_CP_MINIO_ACCESS_KEY (default: minioadmin)
 # - HAN_CP_MINIO_SECRET_KEY (default: minioadmin)
 # - HAN_CP_S3_BUCKET (default: humanoid-network-dev)
+# - HAN_CP_S3_PUBLIC_ENDPOINT (optional, browser-facing endpoint for presigned URLs)
+# - HAN_CP_STATE_ROOT (optional, for example /local/$USER/han_cp_state to avoid home quota)
 
 PEGASUS_HOST="${PEGASUS_HOST:-${1:-}}"
 if [[ -z "$PEGASUS_HOST" ]]; then
@@ -57,6 +59,8 @@ HAN_CP_API_PORT="${HAN_CP_API_PORT:-18000}"
 HAN_CP_MINIO_ACCESS_KEY="${HAN_CP_MINIO_ACCESS_KEY:-minioadmin}"
 HAN_CP_MINIO_SECRET_KEY="${HAN_CP_MINIO_SECRET_KEY:-minioadmin}"
 HAN_CP_S3_BUCKET="${HAN_CP_S3_BUCKET:-humanoid-network-dev}"
+HAN_CP_S3_PUBLIC_ENDPOINT="${HAN_CP_S3_PUBLIC_ENDPOINT:-}"
+HAN_CP_STATE_ROOT="${HAN_CP_STATE_ROOT:-}"
 
 ssh_target="$PEGASUS_HOST"
 if [[ -n "$SSH_USER" && "$ssh_target" != *@* ]]; then
@@ -81,7 +85,7 @@ echo "MinIO port:       $HAN_CP_MINIO_PORT"
 echo ""
 
 "${ssh_cmd[@]}" "$ssh_target" \
-  "bash -s -- $(printf '%q ' "$PEGASUS_REPO" "$CONDA_PREFIX_PATH" "$PULL_REPO" "$SLURM_PARTITION" "$SLURM_TIME" "$SLURM_CPUS_PER_TASK" "$SLURM_MEM" "$HAN_CP_POSTGRES_PORT" "$HAN_CP_REDIS_PORT" "$HAN_CP_MINIO_PORT" "$HAN_CP_MINIO_CONSOLE_PORT" "$HAN_CP_API_PORT" "$HAN_CP_MINIO_ACCESS_KEY" "$HAN_CP_MINIO_SECRET_KEY" "$HAN_CP_S3_BUCKET")" <<'REMOTE'
+  "bash -s -- $(printf '%q ' "$PEGASUS_REPO" "$CONDA_PREFIX_PATH" "$PULL_REPO" "$SLURM_PARTITION" "$SLURM_TIME" "$SLURM_CPUS_PER_TASK" "$SLURM_MEM" "$HAN_CP_POSTGRES_PORT" "$HAN_CP_REDIS_PORT" "$HAN_CP_MINIO_PORT" "$HAN_CP_MINIO_CONSOLE_PORT" "$HAN_CP_API_PORT" "$HAN_CP_MINIO_ACCESS_KEY" "$HAN_CP_MINIO_SECRET_KEY" "$HAN_CP_S3_BUCKET" "$HAN_CP_S3_PUBLIC_ENDPOINT" "$HAN_CP_STATE_ROOT")" <<'REMOTE'
 set -euo pipefail
 
 repo="$1"
@@ -99,6 +103,8 @@ api_port="${12}"
 minio_access_key="${13}"
 minio_secret_key="${14}"
 s3_bucket="${15}"
+s3_public_endpoint="${16}"
+cp_state_root="${17}"
 
 state_root="$repo/tmp/pegasus_control_plane"
 mkdir -p "$state_root/logs"
@@ -142,6 +148,8 @@ export HAN_CP_API_PORT="$api_port"
 export HAN_CP_MINIO_ACCESS_KEY="$minio_access_key"
 export HAN_CP_MINIO_SECRET_KEY="$minio_secret_key"
 export HAN_CP_S3_BUCKET="$s3_bucket"
+export HAN_CP_S3_PUBLIC_ENDPOINT="$s3_public_endpoint"
+export HAN_CP_STATE_ROOT="$cp_state_root"
 bash "$repo/scripts/pegasus/run_control_plane.sh"
 EOF
 chmod +x "$sbatch_script"
@@ -181,12 +189,16 @@ while true; do
   sleep 2
 done
 
+if [[ -z "$s3_public_endpoint" ]]; then
+  s3_public_endpoint="http://$node:$minio_port"
+fi
+
 cat >"$state_root/endpoints.env" <<EOF
 PEGASUS_CONTROL_PLANE_HOST=$node
 DATABASE_URL=postgresql+psycopg://han:han@$node:$pg_port/han
 REDIS_URL=redis://$node:$redis_port/0
 S3_ENDPOINT=http://$node:$minio_port
-S3_PUBLIC_ENDPOINT=http://$node:$minio_port
+S3_PUBLIC_ENDPOINT=$s3_public_endpoint
 S3_ACCESS_KEY=$minio_access_key
 S3_SECRET_KEY=$minio_secret_key
 S3_BUCKET=$s3_bucket

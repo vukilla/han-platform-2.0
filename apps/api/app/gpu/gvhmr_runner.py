@@ -15,14 +15,43 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[4]
 
 
-def _resolve_gvhmr_root() -> Path:
+def _candidate_gvhmr_roots() -> list[Path]:
+    roots: list[Path] = []
     env = os.environ.get("GVHMR_ROOT")
     if env:
-        return Path(env).expanduser().resolve()
+        roots.append(Path(env).expanduser().resolve())
+
+    repo_root = _repo_root()
+    roots.append(repo_root / "external" / "gvhmr")
+    roots.append(repo_root / "external" / "humanoid-projects" / "GVHMR")
+
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for candidate in roots:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
+
+
+def _looks_like_gvhmr_repo(path: Path) -> bool:
+    return (path / "tools" / "demo" / "demo.py").exists() and (path / "hmr4d").exists()
+
+
+def _resolve_gvhmr_root() -> Path:
+    for candidate in _candidate_gvhmr_roots():
+        if candidate.exists() and _looks_like_gvhmr_repo(candidate):
+            return candidate
+    # Keep legacy default for downstream error messages.
     return _repo_root() / "external" / "gvhmr"
 
 
 def _resolve_heavy_checkpoints_root() -> Path:
+    env = os.environ.get("GVHMR_CHECKPOINTS_ROOT")
+    if env:
+        return Path(env).expanduser().resolve()
     return _repo_root() / "external" / "humanoid-projects" / "GVHMR" / "inputs" / "checkpoints"
 
 
@@ -290,6 +319,22 @@ def _ensure_checkpoints(gvhmr_root: Path, *, require_dpvo: bool) -> None:
         )
 
     expected.parent.mkdir(parents=True, exist_ok=True)
+    # When checkpoints are staged outside the repo (for example on Linux node-local `/tmp`),
+    # prefer linking `external/gvhmr/inputs/checkpoints` to that staged root instead of copying
+    # multi-GB files back into the repo path.
+    if os.environ.get("GVHMR_CHECKPOINTS_ROOT"):
+        _remove_dangling_path(expected)
+        if expected.is_symlink():
+            # If a previous run linked to an old/stale location (for example in $HOME),
+            # force it to the current staged root to avoid quota issues.
+            try:
+                if expected.resolve() != heavy.resolve():
+                    expected.unlink()
+            except OSError:
+                expected.unlink()
+        elif expected.exists() and expected.is_dir():
+            shutil.rmtree(expected, ignore_errors=True)
+
     # If the expected directory already exists but is incomplete, try to copy missing files from the staged root.
     if expected.exists() and expected.is_dir():
         for rel in required_files:
@@ -735,10 +780,14 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
 
 def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo: bool, f_mm: int | None) -> dict[str, Any]:
     gvhmr_root = _resolve_gvhmr_root()
-    if not gvhmr_root.exists():
+    demo_script = gvhmr_root / "tools" / "demo" / "demo.py"
+    if (not gvhmr_root.exists()) or (not demo_script.exists()):
+        checked = "\n".join(f"- {p}" for p in _candidate_gvhmr_roots())
         raise FileNotFoundError(
             "GVHMR repo not found. Clone into external/gvhmr or set GVHMR_ROOT.\n"
-            f"Expected: {gvhmr_root}"
+            f"Expected: {gvhmr_root}\n"
+            "Checked:\n"
+            f"{checked}"
         )
     _ensure_checkpoints(gvhmr_root, require_dpvo=bool(use_dpvo))
 

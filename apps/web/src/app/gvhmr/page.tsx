@@ -63,17 +63,29 @@ export default function GVHMRPage() {
     let cancelled = false;
     void (async () => {
       try {
-        await ensureLoggedIn();
+        if (!getToken()) {
+          clearToken();
+          router.push("/auth");
+          throw new Error("Please sign in with Privy first.");
+        }
         const status = await getGvhmrSmplxModelStatus();
         if (!cancelled) setSmplxStatus(status);
-      } catch {
-        if (!cancelled) setSmplxStatus(null);
+      } catch (err) {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : "Failed to load SMPL-X status";
+        if (message.toLowerCase().includes("session expired")) {
+          setError(message);
+          clearToken();
+          router.push("/auth");
+          return;
+        }
+        setSmplxStatus(null);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [router]);
 
   async function handleUploadSmplx() {
     setSmplxUploadStatus(null);
@@ -102,7 +114,7 @@ export default function GVHMRPage() {
       return;
     }
     if (poseReady === false) {
-      setError("Pose worker is offline. Start the Windows worker first, then try again.");
+      setError("Pose worker is offline. Start a pose worker (Pegasus or Windows), then try again.");
       return;
     }
     if (smplxStatus?.exists === false) {
@@ -148,7 +160,7 @@ export default function GVHMRPage() {
         <p className="section-eyebrow">Motion Recovery</p>
         <h1 className="text-3xl font-semibold text-black">Upload a video and recover 3D motion</h1>
         <p className="text-sm text-black/70">
-          This runs motion recovery on the Windows GPU worker and shows a side-by-side preview: original video plus a 3D
+          This runs motion recovery on your pose worker (Pegasus or Windows) and shows a side-by-side preview: original video plus a 3D
           skeleton render. (Powered by GVHMR.)
         </p>
       </section>

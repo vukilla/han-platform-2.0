@@ -63,17 +63,29 @@ export default function StudioPage() {
     let cancelled = false;
     void (async () => {
       try {
-        await ensureLoggedIn();
+        if (!getToken()) {
+          clearToken();
+          router.push("/auth");
+          throw new Error("Please sign in with Privy first.");
+        }
         const status = await getGvhmrSmplxModelStatus();
         if (!cancelled) setSmplxStatus(status);
-      } catch {
-        if (!cancelled) setSmplxStatus(null);
+      } catch (err) {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : "Failed to load SMPL-X status";
+        if (message.toLowerCase().includes("session expired")) {
+          setError(message);
+          clearToken();
+          router.push("/auth");
+          return;
+        }
+        setSmplxStatus(null);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [router]);
 
   async function handleUploadSmplx() {
     setSmplxUploadStatus(null);
@@ -102,7 +114,7 @@ export default function StudioPage() {
       return;
     }
     if (poseReady === false) {
-      setError("Windows pose worker is offline. Start it, then try again.");
+      setError("Pose worker is offline. Start it, then try again.");
       return;
     }
     if (smplxStatus?.exists === false) {
@@ -147,7 +159,7 @@ export default function StudioPage() {
         <p className="section-eyebrow">Studio</p>
         <h1 className="text-3xl font-semibold text-black">Upload one video. Get a 3D motion preview.</h1>
         <p className="max-w-2xl text-sm text-black/70">
-          This runs world-grounded motion recovery on your Windows GPU worker and renders a 3D preview you can compare side-by-side with the original.
+          This runs world-grounded motion recovery on your pose worker (Pegasus or Windows) and renders a 3D preview you can compare side-by-side with the original.
         </p>
       </section>
 

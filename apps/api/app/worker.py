@@ -422,18 +422,20 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
     # If the SMPL-X model was uploaded via the API (`/admin/gvhmr/smplx-model`), pull it into the
     # staged checkpoint folder on the GPU worker. This keeps the GVHMR setup "one-click" from the Web UI.
     try:
-        repo_root = Path(__file__).resolve().parents[3]
-        staged = (
-            repo_root
-            / "external"
-            / "humanoid-projects"
-            / "GVHMR"
-            / "inputs"
-            / "checkpoints"
-            / "body_models"
-            / "smplx"
-            / "SMPLX_NEUTRAL.npz"
-        )
+        staged_root_env = os.environ.get("GVHMR_CHECKPOINTS_ROOT")
+        if staged_root_env:
+            staged_root = Path(staged_root_env).expanduser().resolve()
+        else:
+            repo_root = Path(__file__).resolve().parents[3]
+            staged_root = (
+                repo_root
+                / "external"
+                / "humanoid-projects"
+                / "GVHMR"
+                / "inputs"
+                / "checkpoints"
+            )
+        staged = staged_root / "body_models" / "smplx" / "SMPLX_NEUTRAL.npz"
         if not staged.exists():
             staged.parent.mkdir(parents=True, exist_ok=True)
             try:
@@ -449,8 +451,13 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
     use_dpvo = bool(params.get("gvhmr_use_dpvo", False))
     f_mm = params.get("gvhmr_f_mm", None)
 
+    # GVHMR runner needs heavy deps (torch, cv2, ultralytics). On Linux GPU workers we often
+    # install those into a separate venv and expose it as `GVHMR_DEMO_PYTHON`. Prefer that
+    # interpreter for running `app.gpu.gvhmr_runner` so we do not have to install torch into
+    # the minimal Celery worker environment.
+    python_exec = os.environ.get("GVHMR_PYTHON") or os.environ.get("GVHMR_DEMO_PYTHON") or sys.executable
     cmd = [
-        os.environ.get("GVHMR_PYTHON", sys.executable),
+        python_exec,
         "-m",
         "app.gpu.gvhmr_runner",
         "--video",
