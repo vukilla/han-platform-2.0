@@ -118,10 +118,9 @@ setup_gvhmr_demo_python() {
 
     echo "[Setup] Installing GVHMR demo runtime dependencies into: $demo_prefix"
     "$conda_bin" run -p "$demo_prefix" python -m pip install -U pip wheel setuptools
-    "$conda_bin" run -p "$demo_prefix" python -m pip install -r "$ROOT_DIR/external/gvhmr/requirements.txt"
 
-    # Headless servers often lack libGL/Qt deps required by opencv-python, ensure headless OpenCV wins.
-    "$conda_bin" run -p "$demo_prefix" python -m pip install -U "opencv-python-headless<4.12"
+    # Use a platform-owned, minimal requirements set (avoids build-time deps like chumpy).
+    "$conda_bin" run -p "$demo_prefix" python -m pip install -r "$ROOT_DIR/scripts/linux/requirements.gvhmr_demo.txt"
 
     # Sanity check, native rendering requires pytorch3d.renderer and CUDA.
     "$conda_bin" run -p "$demo_prefix" python -c "import pytorch3d.renderer, torch; assert torch.cuda.is_available()"
