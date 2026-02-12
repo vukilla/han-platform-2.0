@@ -96,9 +96,17 @@ setup_gvhmr_demo_python() {
       exit 1
     fi
 
+    # Avoid relying on a potentially-shared, potentially-corrupted conda package cache.
+    # Use a node-local cache directory by default (still overridable by the user).
+    if [[ -z "${CONDA_PKGS_DIRS:-}" ]]; then
+      pkgs_dir="/tmp/${USER}/han-platform/conda_pkgs"
+      mkdir -p "$pkgs_dir"
+      export CONDA_PKGS_DIRS="$pkgs_dir"
+    fi
+
     # If an old venv exists at the same path, it will conflict with `conda create -p`.
     # Only remove it when explicitly forced.
-    if [[ -d "$demo_prefix" && ! -x "$demo_py" && "${GVHMR_FORCE_SETUP:-0}" == "1" ]]; then
+    if [[ -d "$demo_prefix" && ! -x "$demo_py" ]]; then
       rm -rf "$demo_prefix"
       mkdir -p "$demo_prefix"
     fi
