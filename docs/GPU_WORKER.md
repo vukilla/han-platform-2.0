@@ -3,6 +3,9 @@
 ## Overview
 Run the GPU worker on the RTX 5090 PC as a standalone Python process that consumes Redis jobs and writes artifacts to MinIO.
 
+For remote operation (Pegasus + Windows fallback), see:
+- `docs/PEGASUS_DUAL_WORKER_SETUP.md`
+
 ## Prereqs
 - Python 3.11
 - Access to the Mac host running Redis + MinIO
@@ -43,3 +46,4 @@ docker run --gpus all --env-file .env han-gpu-worker
 - Ensure macOS firewall allows inbound connections on ports 6379 and 9000.
 - GPU-specific dependencies (Isaac Sim / Isaac Lab) should be installed on the PC only.
 - Current `run_xmimic_job` task in `apps/api/app/worker.py` is still a placeholder state-machine; it will be wired to Isaac Lab training once the Windows Isaac Lab setup is stable.
+- `isaaclab_teacher_ppo` backend remains Windows-only, so Linux workers should focus on `pose` queue jobs unless that backend is ported.
