@@ -659,6 +659,18 @@ def _render_gvhmr_global_preview(
     debug["verts_y_min_final"] = float(verts_global[..., 1].min().item())
     debug["verts_y_max_final"] = float(verts_global[..., 1].max().item())
 
+    # If the global mesh is entirely behind the camera (z <= 0), projection collapses and the preview
+    # looks empty or "floating". Shift the whole scene forward so the body is in front of the camera.
+    min_z = float(verts_global[..., 2].min().item())
+    debug["verts_z_min_final"] = float(min_z)
+    if min_z < 0.25:
+        z_shift = float(0.25 - min_z)
+        verts_global[..., 2] = verts_global[..., 2] + z_shift
+        joints_global_smpl24[..., 2] = joints_global_smpl24[..., 2] + z_shift
+        debug["scene_z_shift"] = float(z_shift)
+    else:
+        debug["scene_z_shift"] = 0.0
+
     # === Static global camera (match GVHMR `get_global_cameras_static`) ===
     targets = verts_global.mean(dim=1).detach().cpu()  # (F, 3)
     targets[:, 1] = 0.0
