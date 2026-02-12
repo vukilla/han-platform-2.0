@@ -188,7 +188,7 @@ echo "Log err:      $ERR_LOG"
 echo ""
 
 "${ssh_cmd[@]}" "$ssh_target" \
-  "bash -s -- $(printf '%q ' "$PEGASUS_REPO" "$PULL_REPO" "$INSTALL_REQS" "$PEGASUS_LAUNCH_MODE" "$SLURM_PARTITION" "$SLURM_TIME" "$SLURM_GRES" "$SLURM_CPUS_PER_TASK" "$SLURM_MEM" "$HAN_PYTHON_BIN" "$HAN_WORKER_QUEUES" "$HAN_WORKER_POOL" "$HAN_WORKER_CONCURRENCY" "$REDIS_URL" "$DATABASE_URL" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" "$S3_BUCKET" "$S3_REGION" "$S3_SECURE" "$GVHMR_NATIVE_RENDER" "$GVHMR_RENDER_DEVICE" "$GVHMR_RENDER_INCAM" "$GVHMR_RENDER_EXTRA_VIEWS" "$PID_FILE" "$JOB_ID_FILE" "$OUT_LOG" "$ERR_LOG")" <<'REMOTE'
+  "bash -s -- $(printf '%q ' "$PEGASUS_REPO" "$PULL_REPO" "$INSTALL_REQS" "$PEGASUS_LAUNCH_MODE" "$SLURM_PARTITION" "$SLURM_TIME" "$SLURM_GRES" "$SLURM_CPUS_PER_TASK" "$SLURM_MEM" "$SLURM_NODELIST" "$SLURM_EXCLUDE" "$SLURM_REQUEUE" "$HAN_PYTHON_BIN" "$HAN_WORKER_QUEUES" "$HAN_WORKER_POOL" "$HAN_WORKER_CONCURRENCY" "$REDIS_URL" "$DATABASE_URL" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" "$S3_BUCKET" "$S3_REGION" "$S3_SECURE" "$GVHMR_NATIVE_RENDER" "$GVHMR_RENDER_DEVICE" "$GVHMR_RENDER_INCAM" "$GVHMR_RENDER_EXTRA_VIEWS" "$PID_FILE" "$JOB_ID_FILE" "$OUT_LOG" "$ERR_LOG")" <<'REMOTE'
 set -euo pipefail
 
 remote_repo="$1"
@@ -200,26 +200,29 @@ slurm_time="$6"
 slurm_gres="$7"
 slurm_cpus_per_task="$8"
 slurm_mem="$9"
-python_bin="${10}"
-worker_queues="${11}"
-worker_pool="${12}"
-worker_concurrency="${13}"
-redis_url="${14}"
-database_url="${15}"
-s3_endpoint="${16}"
-s3_access_key="${17}"
-s3_secret_key="${18}"
-s3_bucket="${19}"
-s3_region="${20}"
-s3_secure="${21}"
-gvhmr_native_render="${22}"
-gvhmr_render_device="${23}"
-gvhmr_render_incam="${24}"
-gvhmr_render_extra_views="${25}"
-pid_file="${26}"
-job_id_file="${27}"
-out_log="${28}"
-err_log="${29}"
+slurm_nodelist="${10}"
+slurm_exclude="${11}"
+slurm_requeue="${12}"
+python_bin="${13}"
+worker_queues="${14}"
+worker_pool="${15}"
+worker_concurrency="${16}"
+redis_url="${17}"
+database_url="${18}"
+s3_endpoint="${19}"
+s3_access_key="${20}"
+s3_secret_key="${21}"
+s3_bucket="${22}"
+s3_region="${23}"
+s3_secure="${24}"
+gvhmr_native_render="${25}"
+gvhmr_render_device="${26}"
+gvhmr_render_incam="${27}"
+gvhmr_render_extra_views="${28}"
+pid_file="${29}"
+job_id_file="${30}"
+out_log="${31}"
+err_log="${32}"
 
 mkdir -p "$remote_repo/tmp"
 
@@ -339,7 +342,7 @@ EOF
     --error "$err_log"
   )
 
-  if [[ "$SLURM_REQUEUE" == "1" ]]; then
+  if [[ "$slurm_requeue" == "1" ]]; then
     sbatch_args+=(--requeue)
   fi
   if [[ -n "$slurm_cpus_per_task" ]]; then
@@ -348,11 +351,11 @@ EOF
   if [[ -n "$slurm_mem" ]]; then
     sbatch_args+=(--mem "$slurm_mem")
   fi
-  if [[ -n "$SLURM_NODELIST" ]]; then
-    sbatch_args+=(--nodelist "$SLURM_NODELIST")
+  if [[ -n "$slurm_nodelist" ]]; then
+    sbatch_args+=(--nodelist "$slurm_nodelist")
   fi
-  if [[ -n "$SLURM_EXCLUDE" ]]; then
-    sbatch_args+=(--exclude "$SLURM_EXCLUDE")
+  if [[ -n "$slurm_exclude" ]]; then
+    sbatch_args+=(--exclude "$slurm_exclude")
   fi
 
   job_id="$(sbatch "${sbatch_args[@]}" "$batch_file" "$env_file" "$remote_repo")"
