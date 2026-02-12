@@ -52,36 +52,75 @@ if [[ "${INSTALL_REQS:-0}" == "1" ]]; then
 fi
 
 setup_gvhmr_demo_python() {
-  # Keep heavy GVHMR runtime deps off NFS/home quota by using a node-local venv.
+  # GVHMR's official renderer depends on a specific Python/Torch/PyTorch3D combo.
+  # The upstream GVHMR requirements ship a PyTorch3D wheel for:
+  # - Python 3.10
+  # - torch 2.3.0+cu121
+  #
+  # The Celery worker itself can run on a different Python, but we run the GVHMR demo
+  # pipeline in this dedicated env and expose it as `GVHMR_DEMO_PYTHON`.
   local demo_py="${GVHMR_DEMO_PYTHON:-}"
-  if [[ -z "$demo_py" ]]; then
-    local demo_venv="${GVHMR_DEMO_VENV:-/tmp/${USER}/han-platform/gvhmr_demo_venv}"
-    if [[ ! -x "$demo_venv/bin/python" ]]; then
-      mkdir -p "$(dirname "$demo_venv")"
-      python3 -m venv --system-site-packages "$demo_venv"
-    fi
-    demo_py="$demo_venv/bin/python"
-    export GVHMR_DEMO_PYTHON="$demo_py"
+  local demo_prefix="${GVHMR_DEMO_ENV_PREFIX:-}"
+
+  if [[ -n "$demo_py" && -z "$demo_prefix" ]]; then
+    demo_prefix="$(dirname "$(dirname "$demo_py")")"
+    export GVHMR_DEMO_ENV_PREFIX="$demo_prefix"
   fi
 
-  local marker="${GVHMR_DEMO_ENV_READY_MARKER:-$(dirname "$demo_py")/.han_gvhmr_ready}"
+  if [[ -z "$demo_py" ]]; then
+    if [[ -z "$demo_prefix" ]]; then
+      # Prefer node-local storage to avoid home/NFS quotas. Fall back to /tmp.
+      preferred_prefix="/local/${USER}/han-platform/gvhmr_demo_env"
+      if mkdir -p "$preferred_prefix" >/dev/null 2>&1; then
+        demo_prefix="$preferred_prefix"
+      else
+        demo_prefix="/tmp/${USER}/han-platform/gvhmr_demo_env"
+        mkdir -p "$demo_prefix"
+      fi
+    fi
+
+    demo_py="$demo_prefix/bin/python"
+    export GVHMR_DEMO_PYTHON="$demo_py"
+    export GVHMR_DEMO_ENV_PREFIX="$demo_prefix"
+  fi
+
+  local marker="${GVHMR_DEMO_ENV_READY_MARKER:-${demo_prefix}/.han_gvhmr_ready}"
   if [[ "${GVHMR_FORCE_SETUP:-0}" == "1" ]]; then
     rm -f "$marker"
   fi
+
   if [[ ! -f "$marker" ]]; then
-    echo "[Setup] Installing GVHMR demo runtime dependencies into: $(dirname "$demo_py")"
-    "$demo_py" -m pip install -U pip wheel setuptools
-    "$demo_py" -m pip install \
-      "numpy==1.26.4" \
-      "opencv-python-headless<4.12" \
-      "pytorch-lightning==2.3.0" \
-      "hydra-core==1.3.2" \
-	      hydra-zen rich tqdm einops "timm==0.9.12" yacs \
-	      ffmpeg-python scikit-image termcolor colorlog "imageio==2.34.1" imageio-ffmpeg "av==13.0.0" joblib \
-	      trimesh smplx "ultralytics==8.2.42"
-	    touch "$marker"
-	  fi
-	}
+    conda_bin="$(command -v conda || true)"
+    if [[ -z "$conda_bin" ]]; then
+      echo "[ERROR] conda not found in PATH. Cannot set up GVHMR demo environment." >&2
+      exit 1
+    fi
+
+    # If an old venv exists at the same path, it will conflict with `conda create -p`.
+    # Only remove it when explicitly forced.
+    if [[ -d "$demo_prefix" && ! -x "$demo_py" && "${GVHMR_FORCE_SETUP:-0}" == "1" ]]; then
+      rm -rf "$demo_prefix"
+      mkdir -p "$demo_prefix"
+    fi
+
+    if [[ ! -x "$demo_py" ]]; then
+      echo "[Setup] Creating GVHMR demo conda env (py310) at: $demo_prefix"
+      "$conda_bin" create -y -p "$demo_prefix" python=3.10
+    fi
+
+    echo "[Setup] Installing GVHMR demo runtime dependencies into: $demo_prefix"
+    "$conda_bin" run -p "$demo_prefix" python -m pip install -U pip wheel setuptools
+    "$conda_bin" run -p "$demo_prefix" python -m pip install -r "$ROOT_DIR/external/gvhmr/requirements.txt"
+
+    # Headless servers often lack libGL/Qt deps required by opencv-python, ensure headless OpenCV wins.
+    "$conda_bin" run -p "$demo_prefix" python -m pip install -U "opencv-python-headless<4.12"
+
+    # Sanity check, native rendering requires pytorch3d.renderer and CUDA.
+    "$conda_bin" run -p "$demo_prefix" python -c "import pytorch3d.renderer, torch; assert torch.cuda.is_available()"
+
+    touch "$marker"
+  fi
+}
 
 if [[ "${HAN_WORKER_ROLE}" == "pose" ]]; then
   setup_gvhmr_demo_python
