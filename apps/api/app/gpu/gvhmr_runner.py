@@ -406,7 +406,13 @@ def _load_smpl_params(results_path: Path) -> dict[str, Any]:
     return {"smpl_params_global": smpl_np}
 
 
-def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Path) -> dict[str, Any]:
+def _render_gvhmr_global_preview(
+    video_path: Path,
+    results_path: Path,
+    out_mp4_path: Path,
+    *,
+    yaw_deg: float = 45.0,
+) -> dict[str, Any]:
     """Create a lightweight GVHMR-style preview video without PyTorch3D renderer.
 
     GVHMR's official demo produces `<video_stem>_3_incam_global_horiz.mp4`:
@@ -605,15 +611,14 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
     dist_fit = float(radius.item()) / max(math.tan(fov * 0.5), 1e-3) * 1.25
     cam_dist = float(max(target_scale_val, dist_fit))
 
-    vec_rad = float(math.radians(45.0))
+    vec_rad = float(math.radians(float(yaw_deg)))
     vec = torch.tensor([math.sin(vec_rad), 0.0, math.cos(vec_rad)], dtype=torch.float32)
     vec = vec / torch.norm(vec)
-    cam_pos = target_center + vec * cam_dist
-    cam_pos[1] = cam_dist * float(math.tan(math.radians(20.0))) + 1.0  # cam_height_degree=20, target_center_height=1.0
-
-    cam_target = target_center.clone()
-    cam_target[1] = 1.0
-    up = torch.tensor([0.0, 1.0, 0.0], dtype=torch.float32)
+    # Aim at the body center, not an arbitrary fixed height, so the subject stays centered.
+    body_y_min = float(verts_global[..., 1].min().item())
+    body_y_max = float(verts_global[..., 1].max().item())
+    body_h = float(max(body_y_max - body_y_min, 1.0))
+    target_y = float(max(0.9, body_h * 0.55))
 
     def _look_at_world_to_cam(pos: torch.Tensor, at: torch.Tensor, up_vec: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         # Returns (R, t) such that p_cam = p_world @ R.T + t
@@ -627,7 +632,62 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
         t = -(R @ pos)
         return R, t
 
-    R_wc, t_wc = _look_at_world_to_cam(cam_pos, cam_target, up)
+    up = torch.tensor([0.0, 1.0, 0.0], dtype=torch.float32)
+
+    def _camera_for_dist(dist: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        pos = target_center + vec * float(dist)
+        pos[1] = float(dist) * float(math.tan(math.radians(20.0))) + target_y  # cam_height_degree=20
+        at = target_center.clone()
+        at[1] = target_y
+        R, t = _look_at_world_to_cam(pos, at, up)
+        return pos, at, R, t
+
+    # Tighten framing using a few iterations on the projected joints bbox.
+    # This keeps global views from looking "tiny" when motion is mostly in-place.
+    if joints_global_smpl24.shape[0] > 0:
+        sample_ids = np.linspace(
+            0,
+            int(joints_global_smpl24.shape[0]) - 1,
+            num=int(min(7, joints_global_smpl24.shape[0])),
+            dtype=np.int32,
+        )
+        K_cpu = K_global.detach().cpu()
+        jw = joints_global_smpl24.detach().cpu()
+        target_w = float(panel_w) * 0.62
+        target_h = float(panel_h) * 0.78
+        for _ in range(4):
+            _, _, R_tmp, t_tmp = _camera_for_dist(cam_dist)
+            # Project joints for a few sampled frames.
+            uvs: list[np.ndarray] = []
+            for sid in sample_ids:
+                pc = torch.matmul(jw[int(sid)], R_tmp.T) + t_tmp  # (J, 3)
+                valid = pc[:, 2] > 1e-3
+                if not bool(valid.any()):
+                    continue
+                uv = _project_pinhole(pc[valid], K_cpu).detach().cpu().numpy()
+                if uv.size:
+                    uvs.append(uv)
+            if not uvs:
+                break
+            all_uv = np.concatenate(uvs, axis=0)
+            if not np.all(np.isfinite(all_uv)):
+                all_uv = all_uv[np.isfinite(all_uv).all(axis=1)]
+            if all_uv.shape[0] < 8:
+                break
+            u0, v0 = np.percentile(all_uv, 2, axis=0)
+            u1, v1 = np.percentile(all_uv, 98, axis=0)
+            bw = float(max(u1 - u0, 1.0))
+            bh = float(max(v1 - v0, 1.0))
+            scale = min(target_w / bw, target_h / bh)
+            if not (scale > 0):
+                break
+            # If we're already within 10 percent of target, stop.
+            if 0.9 <= scale <= 1.1:
+                break
+            cam_dist = float(cam_dist / max(scale, 1e-3))
+            cam_dist = float(max(cam_dist, 1.0))
+
+    cam_pos, cam_target, R_wc, t_wc = _camera_for_dist(cam_dist)
 
     def _project_global(points_world: torch.Tensor) -> torch.Tensor:
         pw = points_world.detach().cpu()
@@ -775,6 +835,204 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
         "stride": int(stride),
         "frames_out": int(frame_ids.shape[0]),
         "layout": "global_meshlike",
+        "yaw_deg": float(yaw_deg),
+    }
+
+
+def _render_gvhmr_incam_overlay(
+    video_path: Path,
+    results_path: Path,
+    out_mp4_path: Path,
+) -> dict[str, Any]:
+    """Render an in-camera overlay preview without PyTorch3D.
+
+    This approximates GVHMR's native `1_incam.mp4` output by projecting SMPL-X vertices
+    using `smpl_params_incam` and `K_fullimg` from `hmr4d_results.pt`.
+    """
+    import math
+
+    import cv2
+    import numpy as np
+    import torch
+
+    pred = torch.load(results_path, map_location="cpu")
+    smpl_incam = pred.get("smpl_params_incam") or {}
+    K_fullimg = pred.get("K_fullimg", None)
+    if not smpl_incam or K_fullimg is None:
+        raise ValueError("hmr4d_results.pt missing smpl_params_incam/K_fullimg")
+
+    # Prefer GVHMR's internal 30fps re-encoded video; it matches result length exactly.
+    gvhmr_video = results_path.parent / "0_input_video.mp4"
+    video_for_preview = gvhmr_video if gvhmr_video.exists() else video_path
+
+    cap = cv2.VideoCapture(str(video_for_preview))
+    if not cap.isOpened():
+        raise FileNotFoundError(f"Unable to open video with OpenCV: {video_for_preview}")
+    fps_in = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+    w_in = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    h_in = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    if w_in <= 0 or h_in <= 0:
+        w_in, h_in = 640, 360
+
+    total_frames = int(min(int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0), int(K_fullimg.shape[0])))
+    if total_frames <= 0:
+        total_frames = int(K_fullimg.shape[0])
+
+    max_preview_frames = 450
+    stride = max(1, int(math.ceil(total_frames / max_preview_frames)))
+    frame_ids = np.arange(0, total_frames, stride, dtype=np.int32)
+    fps_out = max(1.0, fps_in / float(stride))
+
+    # Compute mesh vertices in camera space.
+    gvhmr_root = _resolve_gvhmr_root()
+    if str(gvhmr_root) not in sys.path:
+        sys.path.insert(0, str(gvhmr_root))
+    from hmr4d.utils.body_model.smplx_lite import SmplxLite
+
+    def _as_tensor(x) -> torch.Tensor:
+        if torch.is_tensor(x):
+            return x
+        return torch.from_numpy(np.asarray(x))
+
+    body_pose = _as_tensor(smpl_incam.get("body_pose")).float()
+    global_orient = _as_tensor(smpl_incam.get("global_orient")).float()
+    transl = smpl_incam.get("transl", None)
+    transl = (
+        _as_tensor(transl).float()
+        if transl is not None
+        else torch.zeros((int(body_pose.shape[-2]), 3), dtype=torch.float32)
+    )
+    betas = _as_tensor(smpl_incam.get("betas")).float()
+
+    if body_pose.ndim == 2:
+        body_pose = body_pose[None, ...]
+    if global_orient.ndim == 2:
+        global_orient = global_orient[None, ...]
+    if transl.ndim == 2:
+        transl = transl[None, ...]
+    if betas.ndim == 1:
+        betas = betas[None, ...]
+    elif betas.ndim == 2:
+        betas = betas[None, ...]
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model_mesh = SmplxLite().to(device)
+
+    betas_in = (
+        betas[:, frame_ids] if (betas.ndim == 3 and betas.shape[1] >= int(frame_ids.max(initial=0) + 1)) else betas
+    )
+
+    with torch.no_grad():
+        verts_cam = model_mesh(
+            body_pose[:, frame_ids].to(device),
+            betas_in.to(device),
+            global_orient[:, frame_ids].to(device),
+            transl[:, frame_ids].to(device),
+        ).squeeze(0)
+    verts_cam_np = verts_cam.detach().cpu().numpy()  # (F', V, 3)
+    K_np = _as_tensor(K_fullimg[frame_ids]).detach().cpu().numpy()  # (F', 3, 3)
+
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    out_mp4_path.parent.mkdir(parents=True, exist_ok=True)
+    writer = cv2.VideoWriter(str(out_mp4_path), fourcc, fps_out, (int(w_in), int(h_in)))
+    if not writer.isOpened():
+        cap.release()
+        raise RuntimeError(f"Unable to create VideoWriter for: {out_mp4_path}")
+
+    alpha = 0.65
+    kernel = np.ones((5, 5), np.uint8)
+    try:
+        # Read sequentially and only render selected frames (avoid random seeks).
+        want = set(int(x) for x in frame_ids.tolist())
+        next_out = 0
+        frame_idx = 0
+        while next_out < int(frame_ids.shape[0]):
+            ok, frame = cap.read()
+            if not ok:
+                break
+            if frame_idx not in want:
+                frame_idx += 1
+                continue
+
+            verts = verts_cam_np[next_out]
+            K = K_np[next_out]
+            next_out += 1
+            frame_idx += 1
+
+            # Project dense vertex cloud to a depth map in image space.
+            z = verts[:, 2].astype(np.float32)
+            valid = z > 1e-6
+            if not np.any(valid):
+                writer.write(frame)
+                continue
+            x = verts[valid, 0].astype(np.float32)
+            y = verts[valid, 1].astype(np.float32)
+            z = z[valid]
+            u = (x / z) * float(K[0, 0]) + float(K[0, 2])
+            v = (y / z) * float(K[1, 1]) + float(K[1, 2])
+            ui = np.rint(u).astype(np.int32)
+            vi = np.rint(v).astype(np.int32)
+            in_img = (ui >= 0) & (ui < int(w_in)) & (vi >= 0) & (vi < int(h_in))
+            if not np.any(in_img):
+                writer.write(frame)
+                continue
+            ui = ui[in_img]
+            vi = vi[in_img]
+            z = z[in_img].astype(np.float32)
+
+            idx = (vi.astype(np.int64) * int(w_in) + ui.astype(np.int64)).astype(np.int64)
+            depth_flat = np.full(int(h_in) * int(w_in), np.inf, dtype=np.float32)
+            np.minimum.at(depth_flat, idx, z)
+            depth = depth_flat.reshape((int(h_in), int(w_in)))
+
+            valid_depth = np.isfinite(depth)
+            if not np.any(valid_depth):
+                writer.write(frame)
+                continue
+
+            mask_u8 = (valid_depth.astype(np.uint8) * 255)
+            mask_u8 = cv2.morphologyEx(mask_u8, cv2.MORPH_CLOSE, kernel, iterations=2)
+            mask = mask_u8 > 0
+            if not np.any(mask):
+                writer.write(frame)
+                continue
+
+            d_valid = depth[valid_depth]
+            dmin = float(np.percentile(d_valid, 5))
+            dmax = float(np.percentile(d_valid, 95))
+            if not (dmax > dmin):
+                dmin = float(d_valid.min())
+                dmax = float(d_valid.max() + 1e-3)
+
+            depth_clamped = depth.copy()
+            depth_clamped[~valid_depth] = dmax
+            depth_clamped = np.clip(depth_clamped, dmin, dmax)
+            depth_norm = (depth_clamped - dmin) / (dmax - dmin + 1e-6)
+            intensity = 0.92 - 0.42 * depth_norm  # nearer -> brighter
+            body = np.clip(intensity * 255.0, 0, 255).astype(np.uint8)
+            overlay = np.stack([body, body, body], axis=-1)
+
+            out = frame.copy()
+            out[mask] = (out[mask].astype(np.float32) * (1.0 - alpha) + overlay[mask].astype(np.float32) * alpha).astype(
+                np.uint8
+            )
+
+            edges = cv2.Canny(mask_u8, 60, 160)
+            out[edges > 0] = (255, 255, 255)
+
+            writer.write(out)
+    finally:
+        cap.release()
+        writer.release()
+
+    return {
+        "ok": True,
+        "preview_mp4": str(out_mp4_path),
+        "fps_in": fps_in,
+        "fps_out": fps_out,
+        "stride": int(stride),
+        "frames_out": int(frame_ids.shape[0]),
+        "layout": "incam_overlay",
     }
 
 
@@ -909,14 +1167,56 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
     rendered_global_front = results_path.parent / "2_global_front.mp4"
     rendered_global_side = results_path.parent / "2_global_side.mp4"
 
+    # If native rendering is disabled or fails, GVHMR won't emit the MP4 previews. We still want:
+    # - match-camera overlay (incam)
+    # - global 45deg (default)
+    # - global front + side
+    # so the Web UI can offer the same camera toggles on Pegasus and Windows.
+    render_errors: dict[str, str] = {}
+
+    if not rendered_global.exists():
+        try:
+            _render_gvhmr_global_preview(video_path, results_path, rendered_global, yaw_deg=45.0)
+        except Exception as exc:  # noqa: BLE001
+            render_errors["global45"] = f"{type(exc).__name__}: {exc}"
+
+    if not rendered_global_front.exists():
+        try:
+            _render_gvhmr_global_preview(video_path, results_path, rendered_global_front, yaw_deg=0.0)
+        except Exception as exc:  # noqa: BLE001
+            render_errors["global_front"] = f"{type(exc).__name__}: {exc}"
+
+    if not rendered_global_side.exists():
+        try:
+            _render_gvhmr_global_preview(video_path, results_path, rendered_global_side, yaw_deg=90.0)
+        except Exception as exc:  # noqa: BLE001
+            render_errors["global_side"] = f"{type(exc).__name__}: {exc}"
+
+    if not rendered_incam.exists():
+        try:
+            _render_gvhmr_incam_overlay(video_path, results_path, rendered_incam)
+        except Exception as exc:  # noqa: BLE001
+            render_errors["incam"] = f"{type(exc).__name__}: {exc}"
+
     preview_path = rendered_global if rendered_global.exists() else (output_dir / f"{video_path.stem}_gvhmr_preview.mp4")
     preview = None
     preview_error = None
-    if preview_path == rendered_global:
-        preview = {"ok": True, "preview_mp4": str(preview_path), "source": "gvhmr_native_render"}
+    if preview_path.exists():
+        preview = {
+            "ok": True,
+            "preview_mp4": str(preview_path),
+            "source": "gvhmr_native_render" if enable_native_render else "han_fallback_render",
+        }
     else:
+        # Last-resort fallback to ensure the UI never shows an empty preview panel.
         try:
-            preview = _render_gvhmr_preview(video_path, results_path, preview_path)
+            _render_gvhmr_global_preview(video_path, results_path, preview_path, yaw_deg=45.0)
+            if preview_path.exists():
+                preview = {
+                    "ok": True,
+                    "preview_mp4": str(preview_path),
+                    "source": "han_fallback_render",
+                }
         except Exception as exc:  # noqa: BLE001
             preview = None
             preview_error = f"{type(exc).__name__}: {exc}"
@@ -951,6 +1251,7 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         "gvhmr_log": str(gvhmr_log),
         "preview_mp4": str(preview_path) if preview_path.exists() else None,
         "preview_error": preview_error,
+        "fallback_render_errors": render_errors if render_errors else None,
         "native_render": bool(enable_native_render),
         "native_render_global_mp4": str(rendered_global) if rendered_global.exists() else None,
         "native_render_incam_mp4": str(rendered_incam) if rendered_incam.exists() else None,
@@ -978,6 +1279,7 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         "preview_global_side_mp4_path": str(rendered_global_side) if rendered_global_side.exists() else None,
         "input_norm_mp4_path": str(rendered_input_norm) if rendered_input_norm.exists() else None,
         "preview_error": preview_error,
+        "fallback_render_errors": render_errors if render_errors else None,
     }
 
 
