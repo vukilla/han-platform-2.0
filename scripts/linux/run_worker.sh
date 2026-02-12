@@ -122,8 +122,9 @@ setup_gvhmr_demo_python() {
     # Use a platform-owned, minimal requirements set (avoids build-time deps like chumpy).
     "$conda_bin" run -p "$demo_prefix" python -m pip install -r "$ROOT_DIR/scripts/linux/requirements.gvhmr_demo.txt"
 
-    # Sanity check, native rendering requires pytorch3d.renderer and CUDA.
-    "$conda_bin" run -p "$demo_prefix" python -c "import pytorch3d.renderer, torch; assert torch.cuda.is_available()"
+    # Sanity check, native rendering requires pytorch3d.renderer. Do not force a CUDA probe here,
+    # `conda run` can sometimes interfere with GPU-related env vars on Slurm nodes.
+    "$conda_bin" run -p "$demo_prefix" python -c "import pytorch3d.renderer"
 
     touch "$marker"
   fi
