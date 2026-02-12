@@ -76,12 +76,12 @@ setup_gvhmr_demo_python() {
       "opencv-python-headless<4.12" \
       "pytorch-lightning==2.3.0" \
       "hydra-core==1.3.2" \
-      hydra-zen rich tqdm einops "timm==0.9.12" yacs \
-      ffmpeg-python scikit-image termcolor colorlog "imageio==2.34.1" "av==13.0.0" joblib \
-      trimesh smplx "ultralytics==8.2.42"
-    touch "$marker"
-  fi
-}
+	      hydra-zen rich tqdm einops "timm==0.9.12" yacs \
+	      ffmpeg-python scikit-image termcolor colorlog "imageio==2.34.1" imageio-ffmpeg "av==13.0.0" joblib \
+	      trimesh smplx "ultralytics==8.2.42"
+	    touch "$marker"
+	  fi
+	}
 
 if [[ "${HAN_WORKER_ROLE}" == "pose" ]]; then
   setup_gvhmr_demo_python

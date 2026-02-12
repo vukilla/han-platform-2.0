@@ -197,16 +197,13 @@ def _optimize_preview_mp4_for_webkit(path: Path, *, fps: int = 30, gop_seconds: 
     gop = max(1, int(round(float(fps) * float(gop_seconds))))
     tmp = path.with_suffix(".webkit.mp4")
     try:
-        proc = subprocess.run(
+        # Prefer H.264 when available, but some ffmpeg builds (for example imageio-ffmpeg)
+        # may not ship with libx264. Fall back to MPEG-4 Part 2 so we still get:
+        # - frequent keyframes (short GOP)
+        # - faststart moov atom placement
+        # which are the main requirements for smooth WebKit playback.
+        encoder_variants: list[list[str]] = [
             [
-                *ffmpeg,
-                "-y",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-i",
-                str(path),
-                "-an",
                 "-c:v",
                 "libx264",
                 "-preset",
@@ -219,23 +216,56 @@ def _optimize_preview_mp4_for_webkit(path: Path, *, fps: int = 30, gop_seconds: 
                 "main",
                 "-level",
                 "3.1",
-                "-g",
-                str(gop),
-                "-keyint_min",
-                str(gop),
-                "-sc_threshold",
-                "0",
                 "-bf",
                 "0",
-                "-movflags",
-                "+faststart",
-                str(tmp),
             ],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if proc.returncode != 0:
+            [
+                "-c:v",
+                "mpeg4",
+                "-q:v",
+                "5",
+                "-pix_fmt",
+                "yuv420p",
+            ],
+        ]
+
+        ok = False
+        for enc_args in encoder_variants:
+            proc = subprocess.run(
+                [
+                    *ffmpeg,
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-i",
+                    str(path),
+                    "-an",
+                    *enc_args,
+                    "-g",
+                    str(gop),
+                    "-keyint_min",
+                    str(gop),
+                    "-sc_threshold",
+                    "0",
+                    "-movflags",
+                    "+faststart",
+                    str(tmp),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if proc.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
+                ok = True
+                break
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except Exception:
+                pass
+
+        if not ok:
             return False
         if not tmp.exists() or tmp.stat().st_size <= 0:
             return False
@@ -581,9 +611,13 @@ def _render_gvhmr_global_preview(
         verts_global = model_mesh(bp_g.to(device), be_g.to(device), go_g.to(device), tr_g.to(device)).squeeze(0)
 
     # === Normalize + face-Z transform for global view (approx GVHMR `move_to_start_point_face_z`) ===
-    min_y = verts_global[..., 1].min()
+    # Use a robust ground estimate. A single bad vertex in one frame can push `min()` far below
+    # the true floor, which makes the whole body float above the checkered plane.
+    min_y_per_frame = verts_global[..., 1].amin(dim=1).detach().cpu().numpy()
+    floor_y = float(np.percentile(min_y_per_frame, 10))
+
     offset = joints_global_smpl24[0, 0].detach().clone()
-    offset[1] = min_y
+    offset[1] = floor_y
     joints_global_smpl24 = joints_global_smpl24 - offset[None, None, :]
     verts_global = verts_global - offset[None, None, :]
 
@@ -591,6 +625,12 @@ def _render_gvhmr_global_preview(
     T_seq = T_ay2ayfz.repeat(joints_global_smpl24.shape[0], 1, 1)  # (F, 4, 4)
     joints_global_smpl24 = apply_T_on_points(joints_global_smpl24, T_seq)
     verts_global = apply_T_on_points(verts_global, T_seq)
+
+    # Re-level after the global transform, in case it introduces a small vertical drift.
+    min_y_per_frame2 = verts_global[..., 1].amin(dim=1).detach().cpu().numpy()
+    floor_y2 = float(np.percentile(min_y_per_frame2, 10))
+    joints_global_smpl24[..., 1] = joints_global_smpl24[..., 1] - float(floor_y2)
+    verts_global[..., 1] = verts_global[..., 1] - float(floor_y2)
 
     # === Static global camera (similar to GVHMR `get_global_cameras_static`) ===
     targets = joints_global_smpl24.mean(dim=1).detach().cpu()  # (F, 3)
@@ -618,7 +658,7 @@ def _render_gvhmr_global_preview(
     body_y_min = float(verts_global[..., 1].min().item())
     body_y_max = float(verts_global[..., 1].max().item())
     body_h = float(max(body_y_max - body_y_min, 1.0))
-    target_y = float(max(0.9, body_h * 0.55))
+    target_y = float(max(0.7, body_y_min + body_h * 0.55))
 
     def _look_at_world_to_cam(pos: torch.Tensor, at: torch.Tensor, up_vec: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         # Returns (R, t) such that p_cam = p_world @ R.T + t
