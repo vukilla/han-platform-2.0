@@ -10,6 +10,7 @@ import {
   createProject,
   getGvhmrSmplxModelStatus,
   listProjects,
+  API_URL,
   runXgen,
   uploadDemoVideo,
   uploadGvhmrSmplxModel,
@@ -22,6 +23,7 @@ export default function StudioPage() {
   const [file, setFile] = useState<File | null>(null);
   const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
   const [poseReady, setPoseReady] = useState<boolean | null>(null);
+  const [poseStatusError, setPoseStatusError] = useState<string | null>(null);
   const [smplxStatus, setSmplxStatus] = useState<GVHMRSmplxModelStatus | null>(null);
   const [smplxFile, setSmplxFile] = useState<File | null>(null);
   const [smplxUploadStatus, setSmplxUploadStatus] = useState<string | null>(null);
@@ -30,12 +32,33 @@ export default function StudioPage() {
 
   useEffect(() => {
     let timer: NodeJS.Timeout | null = null;
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     const poll = () => {
-      fetch(`${apiUrl}/ops/workers?timeout=1.0`)
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => setPoseReady(Boolean(data?.has_pose_queue)))
-        .catch(() => setPoseReady(null));
+      fetch(`${API_URL}/ops/workers?timeout=1.0`)
+        .then((res) => {
+          if (!res.ok) {
+            return null;
+          }
+          return res.json();
+        })
+        .then((data) => {
+          const hasPoseQueue = Boolean(
+            data?.has_pose_queue ||
+              data?.has_pose_queue_pegasus ||
+              data?.has_pose_queue_windows ||
+              data?.has_pose_queue_legacy,
+          );
+          if (typeof data?.has_pose_queue === "boolean" || hasPoseQueue) {
+            setPoseStatusError(null);
+            setPoseReady(hasPoseQueue);
+            return;
+          }
+          setPoseReady(false);
+          setPoseStatusError("Unable to read worker health payload.");
+        })
+        .catch(() => {
+          setPoseReady(false);
+          setPoseStatusError("Worker check failed. Retrying.");
+        });
     };
     poll();
     timer = setInterval(poll, 3000);
@@ -66,6 +89,8 @@ export default function StudioPage() {
         if (!getToken()) {
           clearToken();
           router.push("/auth");
+          setError("Sign in required to read SMPL-X model status.");
+          setSmplxStatus({ key: "gvhmr/body_models/smplx/SMPLX_NEUTRAL.npz", exists: false });
           throw new Error("Please sign in with Privy first.");
         }
         const status = await getGvhmrSmplxModelStatus();
@@ -77,6 +102,13 @@ export default function StudioPage() {
           setError(message);
           clearToken();
           router.push("/auth");
+          return;
+        }
+        if (message.toLowerCase().includes("missing auth token")) {
+          setSmplxStatus({ key: "gvhmr/body_models/smplx/SMPLX_NEUTRAL.npz", exists: false });
+          if (!error) {
+            setError(message.includes("Sign in") ? message : "Sign in required to read SMPL-X model status.");
+          }
           return;
         }
         setSmplxStatus(null);
@@ -142,7 +174,6 @@ export default function StudioPage() {
         only_pose: true,
         pose_estimator: "gvhmr",
         gvhmr_static_cam: true,
-        gvhmr_skip_render: true,
         gvhmr_max_seconds: 12,
         fail_on_pose_error: true,
       });
@@ -180,13 +211,16 @@ export default function StudioPage() {
                 smplxStatus?.exists === true
                   ? "SMPL-X model uploaded"
                   : smplxStatus?.exists === false
-                    ? "SMPL-X model missing"
+                    ? (error && error.toLowerCase().includes("sign in")
+                      ? "SMPL-X status unavailable (sign in required)"
+                      : "SMPL-X model missing")
                     : "SMPL-X status unknown"
               }
               tone={smplxStatus?.exists === true ? "emerald" : smplxStatus?.exists === false ? "rose" : "amber"}
             />
           </div>
         </div>
+        {poseStatusError ? <p className="text-xs text-rose-700">{poseStatusError}</p> : null}
 
         <input
           type="file"

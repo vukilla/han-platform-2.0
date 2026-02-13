@@ -10,6 +10,7 @@ import {
   createProject,
   getGvhmrSmplxModelStatus,
   listProjects,
+  API_URL,
   runXgen,
   uploadDemoVideo,
   uploadGvhmrSmplxModel,
@@ -30,11 +31,21 @@ export default function GVHMRPage() {
 
   useEffect(() => {
     let timer: NodeJS.Timeout | null = null;
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     const poll = () => {
-      fetch(`${apiUrl}/ops/workers?timeout=1.0`)
+      fetch(`${API_URL}/ops/workers?timeout=1.0`)
         .then((res) => (res.ok ? res.json() : null))
-        .then((data) => setPoseReady(Boolean(data?.has_pose_queue)))
+        .then((data) => {
+          const hasPoseQueue =
+            Boolean(data?.has_pose_queue) ||
+            Boolean(data?.has_pose_queue_pegasus) ||
+            Boolean(data?.has_pose_queue_windows) ||
+            Boolean(data?.has_pose_queue_legacy);
+          if (typeof data?.has_pose_queue === "boolean" || hasPoseQueue) {
+            setPoseReady(hasPoseQueue);
+          } else {
+            setPoseReady(false);
+          }
+        })
         .catch(() => setPoseReady(null));
     };
     poll();
@@ -141,7 +152,6 @@ export default function GVHMRPage() {
         only_pose: true,
         pose_estimator: "gvhmr",
         gvhmr_static_cam: true,
-        gvhmr_skip_render: true,
         gvhmr_max_seconds: 12,
         // On the GVHMR-only page, require the licensed SMPL-X model file and fail fast if it's missing.
         // The job page provides an inline uploader + requeue to recover from this.

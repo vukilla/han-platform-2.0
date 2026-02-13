@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import {
   getDemo,
   getGvhmrSmplxModelStatus,
+  API_URL,
   getXgenJob,
   requeueXgenJob,
   runXmimic,
@@ -237,14 +238,31 @@ export default function JobProgressPage() {
 
   useEffect(() => {
     let timer: NodeJS.Timeout | null = null;
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     const isTerminal = (s: string | null | undefined) => s === "COMPLETED" || s === "FAILED";
     const poll = () => {
-      fetch(`${apiUrl}/ops/workers?timeout=1.0`)
+      fetch(`${API_URL}/ops/workers?timeout=1.0`)
         .then((res) => (res.ok ? res.json() : null))
         .then((data) => {
-          setPoseReady(Boolean(data?.has_pose_queue));
-          setGpuReady(Boolean(data?.has_gpu_queue));
+          const hasPoseQueue =
+            Boolean(data?.has_pose_queue) ||
+            Boolean(data?.has_pose_queue_pegasus) ||
+            Boolean(data?.has_pose_queue_windows) ||
+            Boolean(data?.has_pose_queue_legacy);
+          const hasGpuQueue =
+            Boolean(data?.has_gpu_queue) ||
+            Boolean(data?.has_gpu_queue_pegasus) ||
+            Boolean(data?.has_gpu_queue_windows) ||
+            Boolean(data?.has_gpu_queue_legacy);
+          if (typeof data?.has_pose_queue === "boolean" || hasPoseQueue) {
+            setPoseReady(hasPoseQueue);
+          } else {
+            setPoseReady(false);
+          }
+          if (typeof data?.has_gpu_queue === "boolean" || hasGpuQueue) {
+            setGpuReady(hasGpuQueue);
+          } else {
+            setGpuReady(false);
+          }
         })
         .catch(() => {
           setPoseReady(null);

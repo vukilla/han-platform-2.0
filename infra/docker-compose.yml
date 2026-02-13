@@ -49,7 +49,7 @@ services:
       CELERY_PREFETCH_MULTIPLIER: 1
       CELERY_TASK_ACKS_LATE: "true"
       CELERY_REJECT_ON_WORKER_LOST: "true"
-      GVHMR_ROOT: /app/external/humanoid-projects/GVHMR
+      GVHMR_ROOT: /app/external/gvhmr
     depends_on:
       - db
       - redis
@@ -80,7 +80,7 @@ services:
       CELERY_PREFETCH_MULTIPLIER: 1
       CELERY_TASK_ACKS_LATE: "true"
       CELERY_REJECT_ON_WORKER_LOST: "true"
-      GVHMR_ROOT: /app/external/humanoid-projects/GVHMR
+      GVHMR_ROOT: /app/external/gvhmr
     depends_on:
       - db
       - redis
@@ -88,13 +88,17 @@ services:
     volumes:
       - ../apps/api:/app
       - ${HOST_EXTERNAL_DIR:-../external}:/app/external
-    command: celery -A app.worker.celery_app worker -l info -Q cpu -c 2
+    command: celery -A app.worker.celery_app worker -l info -Q cpu,pose -c 2
 
   web:
     build:
       context: ../apps/web
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_API_URL: /api/proxy
+      # When running Pegasus control-plane with SSH port-forwarding, the API is reachable
+      # on the host at localhost:8000 (forwarded to Pegasus). Inside Docker, use
+      # host.docker.internal to reach the host loopback listener.
+      API_PROXY_TARGET: ${API_PROXY_TARGET:-http://host.docker.internal:8000}
       NEXT_PUBLIC_PRIVY_APP_ID: cmkgtr0dy0421ky0cqdrlltjl
     ports:
       - "3000:3000"

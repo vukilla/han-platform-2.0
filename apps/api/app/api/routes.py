@@ -69,8 +69,8 @@ def _presign_params_json(params_json: dict[str, Any] | None) -> dict[str, Any] |
 def _normalize_gvhmr_fast_profile(params: dict[str, Any] | None) -> dict[str, Any] | None:
     """Apply low-latency defaults for interactive GVHMR-only runs.
 
-    The fastest UX path trims the clip, skips full 3D rendering, and keeps camera mode
-    static unless the caller explicitly requests otherwise.
+    The default UX path trims the clip and keeps camera mode static unless the caller
+    explicitly requests otherwise.
     """
     if not params:
         return params
@@ -87,7 +87,7 @@ def _normalize_gvhmr_fast_profile(params: dict[str, Any] | None) -> dict[str, An
 
     # Low-latency defaults for previews.
     normalized.setdefault("gvhmr_static_cam", True)
-    normalized.setdefault("gvhmr_skip_render", True)
+    normalized.setdefault("gvhmr_skip_render", False)
     normalized.setdefault("gvhmr_max_seconds", 12)
     return normalized
 
