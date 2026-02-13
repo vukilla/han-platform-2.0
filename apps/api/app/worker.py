@@ -450,6 +450,7 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
     static_cam = bool(params.get("gvhmr_static_cam", True))
     use_dpvo = bool(params.get("gvhmr_use_dpvo", False))
     f_mm = params.get("gvhmr_f_mm", None)
+    skip_render = bool(params.get("gvhmr_skip_render", False))
 
     # GVHMR runner needs heavy deps (torch, cv2, ultralytics). On Linux GPU workers we often
     # install those into a separate venv and expose it as `GVHMR_DEMO_PYTHON`. Prefer that
@@ -469,6 +470,8 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
         cmd.append("--static-cam")
     if use_dpvo:
         cmd.append("--use-dpvo")
+    if skip_render:
+        cmd.append("--skip_render")
     if f_mm is not None:
         cmd.extend(["--f-mm", str(int(f_mm))])
 

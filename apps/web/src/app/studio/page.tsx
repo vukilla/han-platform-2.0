@@ -142,6 +142,8 @@ export default function StudioPage() {
         only_pose: true,
         pose_estimator: "gvhmr",
         gvhmr_static_cam: true,
+        gvhmr_skip_render: true,
+        gvhmr_max_seconds: 12,
         fail_on_pose_error: true,
       });
 

@@ -141,6 +141,8 @@ export default function GVHMRPage() {
         only_pose: true,
         pose_estimator: "gvhmr",
         gvhmr_static_cam: true,
+        gvhmr_skip_render: true,
+        gvhmr_max_seconds: 12,
         // On the GVHMR-only page, require the licensed SMPL-X model file and fail fast if it's missing.
         // The job page provides an inline uploader + requeue to recover from this.
         fail_on_pose_error: true,

@@ -66,6 +66,28 @@ def _presign_params_json(params_json: dict[str, Any] | None) -> dict[str, Any] |
     return params
 
 
+def _normalize_gvhmr_fast_profile(params: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Apply low-latency defaults for interactive GVHMR-only runs.
+
+    The fastest UX path trims the clip, skips full 3D rendering, and keeps camera mode
+    static unless the caller explicitly requests otherwise.
+    """
+    if not params:
+        return params
+
+    requires_gpu = bool(params.get("requires_gpu", False))
+    only_pose = bool(params.get("only_pose", False))
+    pose_estimator = str(params.get("pose_estimator") or "").strip().lower()
+    if not (requires_gpu and only_pose and pose_estimator == "gvhmr"):
+        return params
+
+    normalized = dict(params)
+    normalized.setdefault("gvhmr_static_cam", True)
+    normalized.setdefault("gvhmr_skip_render", True)
+    normalized.setdefault("gvhmr_max_seconds", 12)
+    return normalized
+
+
 class AuthLoginRequest(BaseModel):
     email: str
     name: str | None = None
@@ -299,16 +321,16 @@ def run_xgen(
     demo = crud.get_demo(db, demo_id)
     if not demo:
         raise HTTPException(status_code=404, detail="Demo not found")
+    normalized_params = _normalize_gvhmr_fast_profile(payload.params_json or {})
     job = crud.create_xgen_job(
         db,
         demo_id,
-        params_json=payload.params_json,
+        params_json=normalized_params,
         idempotency_key=payload.idempotency_key,
     )
-    params = payload.params_json or {}
-    requires_gpu = bool(params.get("requires_gpu", False))
-    pose_only = bool(params.get("only_pose", False))
-    pose_estimator = str(params.get("pose_estimator") or "").strip().lower()
+    requires_gpu = bool(normalized_params.get("requires_gpu", False))
+    pose_only = bool(normalized_params.get("only_pose", False))
+    pose_estimator = str(normalized_params.get("pose_estimator") or "").strip().lower()
 
     # Route interactive GVHMR pose previews to a dedicated queue so they don't get stuck
     # behind (or crash on) long-running training jobs.
@@ -368,7 +390,7 @@ def requeue_xgen_job(
     db.commit()
     db.refresh(job)
 
-    params = job.params_json or {}
+    params = _normalize_gvhmr_fast_profile(job.params_json or {})
     requires_gpu = bool(params.get("requires_gpu", False))
     pose_only = bool(params.get("only_pose", False))
     pose_estimator = str(params.get("pose_estimator") or "").strip().lower()

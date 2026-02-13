@@ -1056,7 +1056,15 @@ def _render_gvhmr_incam_overlay(
     }
 
 
-def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo: bool, f_mm: int | None) -> dict[str, Any]:
+def run_gvhmr(
+    video_path: Path,
+    output_dir: Path,
+    *,
+    static_cam: bool,
+    use_dpvo: bool,
+    f_mm: int | None,
+    skip_render: bool = False,
+) -> dict[str, Any]:
     gvhmr_root = _resolve_gvhmr_root()
     demo_script = gvhmr_root / "tools" / "demo" / "demo.py"
     if (not gvhmr_root.exists()) or (not demo_script.exists()):
@@ -1083,8 +1091,11 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
     # Native mesh rendering:
     # - If `GVHMR_NATIVE_RENDER` is explicitly set, honor it.
     # - Otherwise, auto-enable it when `pytorch3d.renderer` is importable.
-    enable_native_render = _env_bool("GVHMR_NATIVE_RENDER", default=_can_import_pytorch3d_renderer())
-    if not enable_native_render:
+    # - If skip_render is requested, skip render setup entirely.
+    enable_native_render = False if skip_render else _env_bool("GVHMR_NATIVE_RENDER", default=_can_import_pytorch3d_renderer())
+    if skip_render:
+        cmd.append("--skip_render")
+    elif not enable_native_render:
         # Requires our patched GVHMR demo that supports skipping rendering (avoids pytorch3d renderer dependency).
         cmd.append("--skip_render")
     if static_cam:
@@ -1156,7 +1167,7 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
             stub_backup.rename(stub_dir)
         except Exception:
             pass
-    if enable_native_render and stub_dir.exists() and stub_dir.is_dir():
+    if not skip_render and enable_native_render and stub_dir.exists() and stub_dir.is_dir():
         try:
             if stub_backup.exists():
                 shutil.rmtree(stub_backup)
@@ -1217,46 +1228,44 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
     rendered_global_front = results_path.parent / "2_global_front.mp4"
     rendered_global_side = results_path.parent / "2_global_side.mp4"
 
-    # If native rendering is disabled or fails, GVHMR won't emit the MP4 previews. We still want:
-    # - match-camera overlay (incam)
-    # - global 45deg (default)
-    # - global front + side
-    # so the Web UI can offer the same camera toggles on Pegasus and Windows.
-    render_errors: dict[str, str] = {}
+    # If render is disabled, skip fallback rendering and return only pose outputs.
+    render_errors: dict[str, str] | None = None
     fallback_render_debug: dict[str, Any] = {}
 
-    if not rendered_global.exists():
-        try:
-            out = _render_gvhmr_global_preview(video_path, results_path, rendered_global, yaw_deg=45.0)
-            fallback_render_debug["global45"] = out.get("debug", None)
-        except Exception as exc:  # noqa: BLE001
-            render_errors["global45"] = f"{type(exc).__name__}: {exc}"
+    if not skip_render and (not enable_native_render):
+        render_errors = {}
+        if not rendered_global.exists():
+            try:
+                out = _render_gvhmr_global_preview(video_path, results_path, rendered_global, yaw_deg=45.0)
+                fallback_render_debug["global45"] = out.get("debug", None)
+            except Exception as exc:  # noqa: BLE001
+                render_errors["global45"] = f"{type(exc).__name__}: {exc}"
 
-    if not rendered_global_front.exists():
-        try:
-            out = _render_gvhmr_global_preview(video_path, results_path, rendered_global_front, yaw_deg=0.0)
-            fallback_render_debug["global_front"] = out.get("debug", None)
-        except Exception as exc:  # noqa: BLE001
-            render_errors["global_front"] = f"{type(exc).__name__}: {exc}"
+        if not rendered_global_front.exists():
+            try:
+                out = _render_gvhmr_global_preview(video_path, results_path, rendered_global_front, yaw_deg=0.0)
+                fallback_render_debug["global_front"] = out.get("debug", None)
+            except Exception as exc:  # noqa: BLE001
+                render_errors["global_front"] = f"{type(exc).__name__}: {exc}"
 
-    if not rendered_global_side.exists():
-        try:
-            out = _render_gvhmr_global_preview(video_path, results_path, rendered_global_side, yaw_deg=90.0)
-            fallback_render_debug["global_side"] = out.get("debug", None)
-        except Exception as exc:  # noqa: BLE001
-            render_errors["global_side"] = f"{type(exc).__name__}: {exc}"
+        if not rendered_global_side.exists():
+            try:
+                out = _render_gvhmr_global_preview(video_path, results_path, rendered_global_side, yaw_deg=90.0)
+                fallback_render_debug["global_side"] = out.get("debug", None)
+            except Exception as exc:  # noqa: BLE001
+                render_errors["global_side"] = f"{type(exc).__name__}: {exc}"
 
-    if not rendered_incam.exists():
-        try:
-            out = _render_gvhmr_incam_overlay(video_path, results_path, rendered_incam)
-            fallback_render_debug["incam_overlay"] = {
-                "ok": bool(out.get("ok", True)),
-                "stride": out.get("stride", None),
-                "frames_out": out.get("frames_out", None),
-                "fps_out": out.get("fps_out", None),
-            }
-        except Exception as exc:  # noqa: BLE001
-            render_errors["incam"] = f"{type(exc).__name__}: {exc}"
+        if not rendered_incam.exists():
+            try:
+                out = _render_gvhmr_incam_overlay(video_path, results_path, rendered_incam)
+                fallback_render_debug["incam_overlay"] = {
+                    "ok": bool(out.get("ok", True)),
+                    "stride": out.get("stride", None),
+                    "frames_out": out.get("frames_out", None),
+                    "fps_out": out.get("fps_out", None),
+                }
+            except Exception as exc:  # noqa: BLE001
+                render_errors["incam"] = f"{type(exc).__name__}: {exc}"
 
     preview_path = rendered_global if rendered_global.exists() else (output_dir / f"{video_path.stem}_gvhmr_preview.mp4")
     preview = None
@@ -1283,27 +1292,29 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
             preview = None
             preview_error = f"{type(exc).__name__}: {exc}"
 
-    # Safari/WebKit can look laggy if MP4s have sparse keyframes or aren't "faststart".
-    # Keep the input-normalized video as a cheap remux, but re-encode previews for responsive seeks.
-    faststart: dict[str, bool] = {
-        "input_norm": _faststart_mp4(rendered_input_norm) if rendered_input_norm.exists() else False,
-    }
     optimized: dict[str, bool] = {}
-    for label, path in (
-        ("incam", rendered_incam),
-        ("global45", rendered_global),
-        ("global_front", rendered_global_front),
-        ("global_side", rendered_global_side),
-        ("preview", preview_path),
-    ):
-        if not path.exists():
-            optimized[label] = False
-            continue
-        did_opt = _optimize_preview_mp4_for_webkit(path)
-        optimized[label] = did_opt
-        # Fallback: even if re-encode fails, at least faststart remux for smoother buffering.
-        if not did_opt:
-            faststart[label] = _faststart_mp4(path)
+    faststart: dict[str, bool] = {}
+    if not skip_render:
+        # Safari/WebKit can look laggy if MP4s have sparse keyframes or aren't "faststart".
+        # Keep the input-normalized video as a cheap remux, but re-encode previews for responsive seeks.
+        faststart = {
+            "input_norm": _faststart_mp4(rendered_input_norm) if rendered_input_norm.exists() else False,
+        }
+        for label, path in (
+            ("incam", rendered_incam),
+            ("global45", rendered_global),
+            ("global_front", rendered_global_front),
+            ("global_side", rendered_global_side),
+            ("preview", preview_path),
+        ):
+            if not path.exists():
+                optimized[label] = False
+                continue
+            did_opt = _optimize_preview_mp4_for_webkit(path)
+            optimized[label] = did_opt
+            # Fallback: even if re-encode fails, at least faststart remux for smoother buffering.
+            if not did_opt:
+                faststart[label] = _faststart_mp4(path)
 
     meta = {
         "ok": True,
@@ -1313,7 +1324,7 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         "gvhmr_log": str(gvhmr_log),
         "preview_mp4": str(preview_path) if preview_path.exists() else None,
         "preview_error": preview_error,
-        "fallback_render_errors": render_errors if render_errors else None,
+        "fallback_render_errors": render_errors,
         "fallback_render_debug": fallback_render_debug if fallback_render_debug else None,
         "native_render": bool(enable_native_render),
         "native_render_global_mp4": str(rendered_global) if rendered_global.exists() else None,
@@ -1353,6 +1364,7 @@ def main() -> None:
     parser.add_argument("--static-cam", action="store_true", help="Skip DPVO (recommended for static camera)")
     parser.add_argument("--use-dpvo", action="store_true", help="Enable DPVO visual odometry")
     parser.add_argument("--f-mm", type=int, default=None, help="Focal length in mm for fullframe camera")
+    parser.add_argument("--skip_render", action="store_true", help="Skip preview rendering and directly return pose outputs")
     args = parser.parse_args()
 
     video = Path(args.video).expanduser().resolve()
@@ -1367,6 +1379,7 @@ def main() -> None:
             static_cam=bool(args.static_cam),
             use_dpvo=bool(args.use_dpvo),
             f_mm=args.f_mm,
+            skip_render=bool(args.skip_render),
         )
     except Exception as exc:
         # Best-effort: emit structured JSON so parent processes can surface a useful error.
