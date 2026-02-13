@@ -1,5 +1,6 @@
 param(
   [string]$MacIp = "",
+  [string]$WorkerSource = "windows",
   [string]$Queues = "gpu"
 )
 
@@ -21,6 +22,31 @@ $Queues = $Queues.Trim()
 if (-not $Queues) {
   $Queues = "gpu"
 }
+if (-not $WorkerSource) {
+  $WorkerSource = "windows"
+}
+$normalizedSource = $WorkerSource.Trim().ToLower()
+if (-not ($normalizedSource -eq "pegasus" -or $normalizedSource -eq "windows")) {
+  throw "Invalid WorkerSource '$WorkerSource'. Expected 'pegasus' or 'windows'."
+}
+
+function Map-SourceQueue([string]$source, [string]$value) {
+  $q = $value.Trim().ToLower()
+  if (-not $q) {
+    return $q
+  }
+  switch ($q) {
+    "pose" { return "pose_${source}" }
+    "gpu" { return "gpu_${source}" }
+    default { return $q }
+  }
+}
+
+$mapped = New-Object System.Collections.Generic.List[string]
+foreach ($part in ($Queues -split ",")) {
+  $mapped.Add((Map-SourceQueue $normalizedSource $part))
+}
+$Queues = [string]::Join(",", $mapped.ToArray())
 
 if ($MacIp) {
   $env:REDIS_URL = "redis://${MacIp}:6379/0"
@@ -32,18 +58,19 @@ if ($MacIp) {
 }
 
 $env:HAN_WORKER_QUEUES = $Queues
+$env:HAN_WORKER_SOURCE = $normalizedSource
 
 # Heartbeat role is used by the Mac control-plane to detect which worker is online.
-# If we are only consuming the `pose` queue (GVHMR-only), advertise role=pose.
+# If we are only consuming the mapped pose queue (GVHMR-only), advertise role=pose.
 $queueTokens = @()
 foreach ($part in ($Queues -split ",")) {
   $t = ($part -as [string]).Trim().ToLower()
   if ($t) { $queueTokens += $t }
 }
 $role = "cpu"
-if ($queueTokens -contains "gpu") {
+if ($queueTokens -contains "gpu" -or ($queueTokens -match "^gpu_.*")) {
   $role = "gpu"
-} elseif ($queueTokens -contains "pose") {
+} elseif ($queueTokens -contains "pose" -or ($queueTokens -match "^pose_.*")) {
   $role = "pose"
 } elseif ($queueTokens.Count -gt 0) {
   $role = $queueTokens[0]

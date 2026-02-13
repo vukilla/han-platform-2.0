@@ -178,17 +178,29 @@ export default function JobProgressPage() {
     let cancelled = false;
     void (async () => {
       try {
-        await ensureLoggedIn();
+        if (!getToken()) {
+          clearToken();
+          router.push("/auth");
+          throw new Error("Please sign in with Privy first.");
+        }
         const status = await getGvhmrSmplxModelStatus();
         if (!cancelled) setSmplxStatus(status);
-      } catch {
-        if (!cancelled) setSmplxStatus(null);
+      } catch (err) {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : "Failed to load SMPL-X status";
+        if (message.toLowerCase().includes("session expired")) {
+          setError(message);
+          clearToken();
+          router.push("/auth");
+          return;
+        }
+        setSmplxStatus(null);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [onlyPose]);
+  }, [onlyPose, router]);
 
   async function handleUploadSmplx() {
     setSmplxUploadStatus(null);

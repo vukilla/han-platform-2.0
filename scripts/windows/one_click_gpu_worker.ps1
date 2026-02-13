@@ -2,7 +2,9 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$MacIp,
 
-  [string]$IsaacSimPath = "C:\\isaacsim",
+[string]$IsaacSimPath = "C:\\isaacsim",
+
+  [string]$WorkerSource = "windows",
 
   # Celery queues to consume (e.g., "gpu" for training, "pose" for GVHMR-only).
   [string]$Queues = "gpu"
@@ -20,6 +22,7 @@ Write-Host "== One-click GPU worker (Windows) ==" -ForegroundColor Cyan
 Write-Host "Repo root:     $repoRoot"
 Write-Host "Mac IP:        $MacIp"
 Write-Host "Isaac Sim:     $IsaacSimPath"
+Write-Host "Worker source: $WorkerSource"
 Write-Host "Queues:        $Queues"
 Write-Host ""
 
@@ -69,7 +72,7 @@ if (Test-Path $stopWorker) {
   Write-Host ""
 }
 Write-Host "-- Starting GPU worker (detached) --" -ForegroundColor Cyan
-powershell -NoProfile -ExecutionPolicy Bypass -File $startDetached -MacIp $MacIp -Queues $Queues
+powershell -NoProfile -ExecutionPolicy Bypass -File $startDetached -MacIp $MacIp -WorkerSource $WorkerSource -Queues $Queues
 
 Write-Host ""
 Write-Host "Next (Mac):" -ForegroundColor Green

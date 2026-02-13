@@ -39,6 +39,17 @@ cpu_exchange = Exchange(settings.celery_cpu_queue, type="direct")
 gpu_exchange = Exchange(settings.celery_gpu_queue, type="direct")
 pose_exchange = Exchange(settings.celery_pose_queue, type="direct")
 
+_worker_queues = [
+    settings.celery_cpu_queue,
+    settings.celery_gpu_queue,
+    settings.celery_pose_queue,
+    settings.celery_pose_queue_pegasus,
+    settings.celery_pose_queue_windows,
+    settings.celery_gpu_queue_pegasus,
+    settings.celery_gpu_queue_windows,
+]
+_worker_queues = [q for i, q in enumerate(_worker_queues) if q and q not in _worker_queues[:i]]
+
 celery_app.conf.update(
     task_default_queue=settings.celery_default_queue,
     task_default_exchange=settings.celery_default_queue,
@@ -48,6 +59,10 @@ celery_app.conf.update(
         Queue(settings.celery_cpu_queue, cpu_exchange, routing_key=settings.celery_cpu_queue),
         Queue(settings.celery_gpu_queue, gpu_exchange, routing_key=settings.celery_gpu_queue),
         Queue(settings.celery_pose_queue, pose_exchange, routing_key=settings.celery_pose_queue),
+        Queue(settings.celery_pose_queue_pegasus, Exchange(settings.celery_pose_queue_pegasus, type="direct"), routing_key=settings.celery_pose_queue_pegasus),
+        Queue(settings.celery_pose_queue_windows, Exchange(settings.celery_pose_queue_windows, type="direct"), routing_key=settings.celery_pose_queue_windows),
+        Queue(settings.celery_gpu_queue_pegasus, Exchange(settings.celery_gpu_queue_pegasus, type="direct"), routing_key=settings.celery_gpu_queue_pegasus),
+        Queue(settings.celery_gpu_queue_windows, Exchange(settings.celery_gpu_queue_windows, type="direct"), routing_key=settings.celery_gpu_queue_windows),
     ],
     worker_prefetch_multiplier=settings.celery_prefetch_multiplier,
     task_acks_late=settings.celery_task_acks_late,
@@ -85,9 +100,32 @@ def _detect_worker_role() -> str:
     return "cpu"
 
 
-def _heartbeat_key(worker_name: str, role: str) -> str:
-    # role is usually "cpu" or "gpu"
-    return f"han:worker_heartbeat:{role}:{worker_name}"
+def _detect_worker_source() -> str:
+    source = (os.environ.get("HAN_WORKER_SOURCE") or "").strip().lower()
+    if source in {"pegasus", "windows", "legacy"}:
+        return "legacy" if source == "legacy" else source
+
+    queues_env = (os.environ.get("HAN_WORKER_QUEUES") or "").strip().lower()
+    if "pegasus" in queues_env:
+        return "pegasus"
+    if "windows" in queues_env or "win" in queues_env:
+        return "windows"
+
+    if "_pegasus" in queues_env:
+        return "pegasus"
+    if "_windows" in queues_env:
+        return "windows"
+
+    if "pose" in queues_env or "gpu" in queues_env:
+        return "legacy"
+
+    return "legacy"
+
+
+def _heartbeat_key(worker_name: str, source: str, role: str) -> str:
+    # role is usually "cpu", "gpu", or "pose".
+    # source is one of pegasus, windows, legacy.
+    return f"han:worker_heartbeat:{source}:{role}:{worker_name}"
 
 
 def _start_heartbeat() -> None:
@@ -96,12 +134,13 @@ def _start_heartbeat() -> None:
         return
 
     role = _detect_worker_role()
+    source = _detect_worker_source()
     worker_name = f"celery@{socket.gethostname()}"
-    key = _heartbeat_key(worker_name, role)
+    key = _heartbeat_key(worker_name, source, role)
 
     def _run() -> None:
         client = redis.Redis.from_url(settings.redis_url)
-        payload = json.dumps({"worker_name": worker_name, "role": role})
+        payload = json.dumps({"worker_name": worker_name, "role": role, "source": source})
         while not _heartbeat_stop.is_set():
             try:
                 # Keep a short TTL so stale workers disappear quickly.
@@ -422,18 +461,20 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
     # If the SMPL-X model was uploaded via the API (`/admin/gvhmr/smplx-model`), pull it into the
     # staged checkpoint folder on the GPU worker. This keeps the GVHMR setup "one-click" from the Web UI.
     try:
-        repo_root = Path(__file__).resolve().parents[3]
-        staged = (
-            repo_root
-            / "external"
-            / "humanoid-projects"
-            / "GVHMR"
-            / "inputs"
-            / "checkpoints"
-            / "body_models"
-            / "smplx"
-            / "SMPLX_NEUTRAL.npz"
-        )
+        staged_root_env = os.environ.get("GVHMR_CHECKPOINTS_ROOT")
+        if staged_root_env:
+            staged_root = Path(staged_root_env).expanduser().resolve()
+        else:
+            repo_root = Path(__file__).resolve().parents[3]
+            staged_root = (
+                repo_root
+                / "external"
+                / "humanoid-projects"
+                / "GVHMR"
+                / "inputs"
+                / "checkpoints"
+            )
+        staged = staged_root / "body_models" / "smplx" / "SMPLX_NEUTRAL.npz"
         if not staged.exists():
             staged.parent.mkdir(parents=True, exist_ok=True)
             try:
@@ -448,9 +489,15 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
     static_cam = bool(params.get("gvhmr_static_cam", True))
     use_dpvo = bool(params.get("gvhmr_use_dpvo", False))
     f_mm = params.get("gvhmr_f_mm", None)
+    skip_render = bool(params.get("gvhmr_skip_render", False))
 
+    # GVHMR runner needs heavy deps (torch, cv2, ultralytics). On Linux GPU workers we often
+    # install those into a separate venv and expose it as `GVHMR_DEMO_PYTHON`. Prefer that
+    # interpreter for running `app.gpu.gvhmr_runner` so we do not have to install torch into
+    # the minimal Celery worker environment.
+    python_exec = os.environ.get("GVHMR_PYTHON") or os.environ.get("GVHMR_DEMO_PYTHON") or sys.executable
     cmd = [
-        os.environ.get("GVHMR_PYTHON", sys.executable),
+        python_exec,
         "-m",
         "app.gpu.gvhmr_runner",
         "--video",
@@ -462,6 +509,8 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
         cmd.append("--static-cam")
     if use_dpvo:
         cmd.append("--use-dpvo")
+    if skip_render:
+        cmd.append("--skip_render")
     if f_mm is not None:
         cmd.extend(["--f-mm", str(int(f_mm))])
 

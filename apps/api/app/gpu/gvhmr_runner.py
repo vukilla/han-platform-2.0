@@ -15,14 +15,43 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[4]
 
 
-def _resolve_gvhmr_root() -> Path:
+def _candidate_gvhmr_roots() -> list[Path]:
+    roots: list[Path] = []
     env = os.environ.get("GVHMR_ROOT")
     if env:
-        return Path(env).expanduser().resolve()
+        roots.append(Path(env).expanduser().resolve())
+
+    repo_root = _repo_root()
+    roots.append(repo_root / "external" / "gvhmr")
+    roots.append(repo_root / "external" / "humanoid-projects" / "GVHMR")
+
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for candidate in roots:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
+
+
+def _looks_like_gvhmr_repo(path: Path) -> bool:
+    return (path / "tools" / "demo" / "demo.py").exists() and (path / "hmr4d").exists()
+
+
+def _resolve_gvhmr_root() -> Path:
+    for candidate in _candidate_gvhmr_roots():
+        if candidate.exists() and _looks_like_gvhmr_repo(candidate):
+            return candidate
+    # Keep legacy default for downstream error messages.
     return _repo_root() / "external" / "gvhmr"
 
 
 def _resolve_heavy_checkpoints_root() -> Path:
+    env = os.environ.get("GVHMR_CHECKPOINTS_ROOT")
+    if env:
+        return Path(env).expanduser().resolve()
     return _repo_root() / "external" / "humanoid-projects" / "GVHMR" / "inputs" / "checkpoints"
 
 
@@ -168,16 +197,13 @@ def _optimize_preview_mp4_for_webkit(path: Path, *, fps: int = 30, gop_seconds: 
     gop = max(1, int(round(float(fps) * float(gop_seconds))))
     tmp = path.with_suffix(".webkit.mp4")
     try:
-        proc = subprocess.run(
+        # Prefer H.264 when available, but some ffmpeg builds (for example imageio-ffmpeg)
+        # may not ship with libx264. Fall back to MPEG-4 Part 2 so we still get:
+        # - frequent keyframes (short GOP)
+        # - faststart moov atom placement
+        # which are the main requirements for smooth WebKit playback.
+        encoder_variants: list[list[str]] = [
             [
-                *ffmpeg,
-                "-y",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-i",
-                str(path),
-                "-an",
                 "-c:v",
                 "libx264",
                 "-preset",
@@ -190,23 +216,56 @@ def _optimize_preview_mp4_for_webkit(path: Path, *, fps: int = 30, gop_seconds: 
                 "main",
                 "-level",
                 "3.1",
-                "-g",
-                str(gop),
-                "-keyint_min",
-                str(gop),
-                "-sc_threshold",
-                "0",
                 "-bf",
                 "0",
-                "-movflags",
-                "+faststart",
-                str(tmp),
             ],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if proc.returncode != 0:
+            [
+                "-c:v",
+                "mpeg4",
+                "-q:v",
+                "5",
+                "-pix_fmt",
+                "yuv420p",
+            ],
+        ]
+
+        ok = False
+        for enc_args in encoder_variants:
+            proc = subprocess.run(
+                [
+                    *ffmpeg,
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-i",
+                    str(path),
+                    "-an",
+                    *enc_args,
+                    "-g",
+                    str(gop),
+                    "-keyint_min",
+                    str(gop),
+                    "-sc_threshold",
+                    "0",
+                    "-movflags",
+                    "+faststart",
+                    str(tmp),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if proc.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
+                ok = True
+                break
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except Exception:
+                pass
+
+        if not ok:
             return False
         if not tmp.exists() or tmp.stat().st_size <= 0:
             return False
@@ -290,6 +349,22 @@ def _ensure_checkpoints(gvhmr_root: Path, *, require_dpvo: bool) -> None:
         )
 
     expected.parent.mkdir(parents=True, exist_ok=True)
+    # When checkpoints are staged outside the repo (for example on Linux node-local `/tmp`),
+    # prefer linking `external/gvhmr/inputs/checkpoints` to that staged root instead of copying
+    # multi-GB files back into the repo path.
+    if os.environ.get("GVHMR_CHECKPOINTS_ROOT"):
+        _remove_dangling_path(expected)
+        if expected.is_symlink():
+            # If a previous run linked to an old/stale location (for example in $HOME),
+            # force it to the current staged root to avoid quota issues.
+            try:
+                if expected.resolve() != heavy.resolve():
+                    expected.unlink()
+            except OSError:
+                expected.unlink()
+        elif expected.exists() and expected.is_dir():
+            shutil.rmtree(expected, ignore_errors=True)
+
     # If the expected directory already exists but is incomplete, try to copy missing files from the staged root.
     if expected.exists() and expected.is_dir():
         for rel in required_files:
@@ -361,7 +436,13 @@ def _load_smpl_params(results_path: Path) -> dict[str, Any]:
     return {"smpl_params_global": smpl_np}
 
 
-def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Path) -> dict[str, Any]:
+def _render_gvhmr_global_preview(
+    video_path: Path,
+    results_path: Path,
+    out_mp4_path: Path,
+    *,
+    yaw_deg: float = 45.0,
+) -> dict[str, Any]:
     """Create a lightweight GVHMR-style preview video without PyTorch3D renderer.
 
     GVHMR's official demo produces `<video_stem>_3_incam_global_horiz.mp4`:
@@ -416,23 +497,29 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         body_pose = _as_tensor(params.get("body_pose")).float()
         global_orient = _as_tensor(params.get("global_orient")).float()
-        transl = params.get("transl", None)
-        transl = (
-            _as_tensor(transl).float()
-            if transl is not None
-            else torch.zeros((body_pose.shape[0], 3), dtype=torch.float32)
-        )
         betas = _as_tensor(params.get("betas")).float()
+        transl_raw = params.get("transl", None)
+        transl = _as_tensor(transl_raw).float() if transl_raw is not None else None
 
-        # Add batch dim expected by SmplxLite.
+        # Normalize shapes to (B, F, ...) so SmplxLite behaves consistently across outputs.
         if body_pose.ndim == 2:
             body_pose = body_pose[None, ...]
         if global_orient.ndim == 2:
             global_orient = global_orient[None, ...]
-        if transl.ndim == 2:
+        if transl is not None and transl.ndim == 2:
             transl = transl[None, ...]
+
         if betas.ndim == 1:
             betas = betas[None, ...]
+        elif betas.ndim == 2:
+            # GVHMR commonly stores betas per-frame as (F, 10). Wrap to (1, F, 10).
+            if betas.shape[0] != body_pose.shape[0]:
+                betas = betas[None, ...]
+
+        B = int(body_pose.shape[0])
+        F = int(body_pose.shape[1])
+        if transl is None:
+            transl = torch.zeros((B, F, 3), dtype=torch.float32)
 
         # Some outputs store betas per-frame; slice if needed.
         if betas.ndim == 3 and betas.shape[1] >= int(frame_ids.max(initial=0) + 1):
@@ -529,10 +616,22 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
         joints_global_smpl24 = model_smpl24(bp_g.to(device), be_g.to(device), go_g.to(device), tr_g.to(device)).squeeze(0)
         verts_global = model_mesh(bp_g.to(device), be_g.to(device), go_g.to(device), tr_g.to(device)).squeeze(0)
 
+    debug: dict[str, Any] = {}
+
     # === Normalize + face-Z transform for global view (approx GVHMR `move_to_start_point_face_z`) ===
-    min_y = verts_global[..., 1].min()
+    # We estimate a stable "floor" height from joints. We intentionally prefer a low percentile so
+    # we do not push the body down into the ground. Then, after the transform, we clamp away any
+    # remaining floating (never shift up).
+    min_y_per_frame = joints_global_smpl24[..., 1].amin(dim=1).detach().cpu().numpy()
+    floor_y_p10 = float(np.percentile(min_y_per_frame, 10))
+    floor_y_p50 = float(np.percentile(min_y_per_frame, 50))
+    floor_y = float(floor_y_p10)
+    debug["floor_y_joints_p10_before_T"] = float(floor_y_p10)
+    debug["floor_y_joints_p50_before_T"] = float(floor_y_p50)
+    debug["floor_y_before_T"] = float(floor_y)
+
     offset = joints_global_smpl24[0, 0].detach().clone()
-    offset[1] = min_y
+    offset[1] = floor_y
     joints_global_smpl24 = joints_global_smpl24 - offset[None, None, :]
     verts_global = verts_global - offset[None, None, :]
 
@@ -541,34 +640,48 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
     joints_global_smpl24 = apply_T_on_points(joints_global_smpl24, T_seq)
     verts_global = apply_T_on_points(verts_global, T_seq)
 
-    # === Static global camera (similar to GVHMR `get_global_cameras_static`) ===
-    targets = joints_global_smpl24.mean(dim=1).detach().cpu()  # (F, 3)
+    # Re-level after the global transform by shifting down only if we are floating.
+    min_y_per_frame2 = joints_global_smpl24[..., 1].amin(dim=1).detach().cpu().numpy()
+    floor_y2_p10 = float(np.percentile(min_y_per_frame2, 10))
+    floor_y2_p50 = float(np.percentile(min_y_per_frame2, 50))
+    debug["floor_y_joints_p10_after_T"] = float(floor_y2_p10)
+    debug["floor_y_joints_p50_after_T"] = float(floor_y2_p50)
+    if floor_y2_p10 > 0:
+        joints_global_smpl24[..., 1] = joints_global_smpl24[..., 1] - float(floor_y2_p10)
+        verts_global[..., 1] = verts_global[..., 1] - float(floor_y2_p10)
+        debug["post_T_shift_down"] = float(floor_y2_p10)
+    else:
+        debug["post_T_shift_down"] = 0.0
+
+    # Final vertical range diagnostics (helps debug "floating above ground" issues).
+    debug["joints_y_min_final"] = float(joints_global_smpl24[..., 1].min().item())
+    debug["joints_y_max_final"] = float(joints_global_smpl24[..., 1].max().item())
+    debug["verts_y_min_final"] = float(verts_global[..., 1].min().item())
+    debug["verts_y_max_final"] = float(verts_global[..., 1].max().item())
+
+    # If the global mesh is entirely behind the camera (z <= 0), projection collapses and the preview
+    # looks empty or "floating". Shift the whole scene forward so the body is in front of the camera.
+    min_z = float(verts_global[..., 2].min().item())
+    debug["verts_z_min_final"] = float(min_z)
+    if min_z < 0.25:
+        z_shift = float(0.25 - min_z)
+        verts_global[..., 2] = verts_global[..., 2] + z_shift
+        joints_global_smpl24[..., 2] = joints_global_smpl24[..., 2] + z_shift
+        debug["scene_z_shift"] = float(z_shift)
+    else:
+        debug["scene_z_shift"] = 0.0
+
+    # === Static global camera (match GVHMR `get_global_cameras_static`) ===
+    targets = verts_global.mean(dim=1).detach().cpu()  # (F, 3)
     targets[:, 1] = 0.0
     target_center = targets.mean(dim=0)  # (3,)
     target_scale = torch.norm(targets - target_center[None, :], dim=-1).max()
-    target_scale_val = float(max(target_scale.item(), 1.0)) * 2.0  # beta=2.0 (GVHMR default)
+    cam_dist = float(max(target_scale.item(), 1.0)) * 2.0  # beta=2.0 (GVHMR default)
 
-    # Fit the camera distance to the motion radius so the subject stays in-frame.
-    fx = float(K_global[0, 0].item())
-    fy = float(K_global[1, 1].item())
-    fov_x = 2.0 * math.atan((float(panel_w) * 0.5) / max(fx, 1e-6))
-    fov_y = 2.0 * math.atan((float(panel_h) * 0.5) / max(fy, 1e-6))
-    fov = float(min(fov_x, fov_y))
-    joints_cpu = joints_global_smpl24.detach().cpu().reshape(-1, 3)
-    radius = torch.norm(joints_cpu - target_center[None, :], dim=-1).max()
-    # Distance required so that the bounding sphere roughly fits the view frustum.
-    dist_fit = float(radius.item()) / max(math.tan(fov * 0.5), 1e-3) * 1.25
-    cam_dist = float(max(target_scale_val, dist_fit))
-
-    vec_rad = float(math.radians(45.0))
+    vec_rad = float(math.radians(float(yaw_deg)))
     vec = torch.tensor([math.sin(vec_rad), 0.0, math.cos(vec_rad)], dtype=torch.float32)
     vec = vec / torch.norm(vec)
-    cam_pos = target_center + vec * cam_dist
-    cam_pos[1] = cam_dist * float(math.tan(math.radians(20.0))) + 1.0  # cam_height_degree=20, target_center_height=1.0
-
-    cam_target = target_center.clone()
-    cam_target[1] = 1.0
-    up = torch.tensor([0.0, 1.0, 0.0], dtype=torch.float32)
+    target_center_height = 1.0
 
     def _look_at_world_to_cam(pos: torch.Tensor, at: torch.Tensor, up_vec: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         # Returns (R, t) such that p_cam = p_world @ R.T + t
@@ -582,7 +695,18 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
         t = -(R @ pos)
         return R, t
 
+    up = torch.tensor([0.0, 1.0, 0.0], dtype=torch.float32)
+
+    cam_pos = target_center + vec * float(cam_dist)
+    cam_pos[1] = float(cam_dist) * float(math.tan(math.radians(20.0))) + float(target_center_height)
+    cam_target = target_center.clone()
+    cam_target[1] = float(target_center_height)
     R_wc, t_wc = _look_at_world_to_cam(cam_pos, cam_target, up)
+    debug["cam_dist"] = float(cam_dist)
+    debug["cam_pos"] = [float(x) for x in cam_pos.detach().cpu().tolist()]
+    debug["cam_target"] = [float(x) for x in cam_target.detach().cpu().tolist()]
+    debug["target_center"] = [float(x) for x in target_center.detach().cpu().tolist()]
+    debug["target_center_height"] = float(target_center_height)
 
     def _project_global(points_world: torch.Tensor) -> torch.Tensor:
         pw = points_world.detach().cpu()
@@ -593,7 +717,7 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
     root_points = joints_global_smpl24[:, 0, :].detach().cpu().numpy()
     cx = float((root_points[:, 0].max() + root_points[:, 0].min()) * 0.5)
     cz = float((root_points[:, 2].max() + root_points[:, 2].min()) * 0.5)
-    all_pts = joints_global_smpl24.detach().cpu().numpy().reshape(-1, 3)
+    all_pts = verts_global.detach().cpu().numpy().reshape(-1, 3)
     scale_x = float(all_pts[:, 0].max() - all_pts[:, 0].min())
     scale_z = float(all_pts[:, 2].max() - all_pts[:, 2].min())
     grid_scale = max(scale_x, scale_z, 1.0) * 1.5
@@ -730,15 +854,226 @@ def _render_gvhmr_preview(video_path: Path, results_path: Path, out_mp4_path: Pa
         "stride": int(stride),
         "frames_out": int(frame_ids.shape[0]),
         "layout": "global_meshlike",
+        "yaw_deg": float(yaw_deg),
+        "debug": debug,
     }
 
 
-def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo: bool, f_mm: int | None) -> dict[str, Any]:
+def _render_gvhmr_incam_overlay(
+    video_path: Path,
+    results_path: Path,
+    out_mp4_path: Path,
+) -> dict[str, Any]:
+    """Render an in-camera overlay preview without PyTorch3D.
+
+    This approximates GVHMR's native `1_incam.mp4` output by projecting SMPL-X vertices
+    using `smpl_params_incam` and `K_fullimg` from `hmr4d_results.pt`.
+    """
+    import math
+
+    import cv2
+    import numpy as np
+    import torch
+
+    pred = torch.load(results_path, map_location="cpu")
+    smpl_incam = pred.get("smpl_params_incam") or {}
+    K_fullimg = pred.get("K_fullimg", None)
+    if not smpl_incam or K_fullimg is None:
+        raise ValueError("hmr4d_results.pt missing smpl_params_incam/K_fullimg")
+
+    # Prefer GVHMR's internal 30fps re-encoded video; it matches result length exactly.
+    gvhmr_video = results_path.parent / "0_input_video.mp4"
+    video_for_preview = gvhmr_video if gvhmr_video.exists() else video_path
+
+    cap = cv2.VideoCapture(str(video_for_preview))
+    if not cap.isOpened():
+        raise FileNotFoundError(f"Unable to open video with OpenCV: {video_for_preview}")
+    fps_in = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+    w_in = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    h_in = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    if w_in <= 0 or h_in <= 0:
+        w_in, h_in = 640, 360
+
+    total_frames = int(min(int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0), int(K_fullimg.shape[0])))
+    if total_frames <= 0:
+        total_frames = int(K_fullimg.shape[0])
+
+    max_preview_frames = 450
+    stride = max(1, int(math.ceil(total_frames / max_preview_frames)))
+    frame_ids = np.arange(0, total_frames, stride, dtype=np.int32)
+    fps_out = max(1.0, fps_in / float(stride))
+
+    # Compute mesh vertices in camera space.
     gvhmr_root = _resolve_gvhmr_root()
-    if not gvhmr_root.exists():
+    if str(gvhmr_root) not in sys.path:
+        sys.path.insert(0, str(gvhmr_root))
+    from hmr4d.utils.body_model.smplx_lite import SmplxLite
+
+    def _as_tensor(x) -> torch.Tensor:
+        if torch.is_tensor(x):
+            return x
+        return torch.from_numpy(np.asarray(x))
+
+    body_pose = _as_tensor(smpl_incam.get("body_pose")).float()
+    global_orient = _as_tensor(smpl_incam.get("global_orient")).float()
+    transl = smpl_incam.get("transl", None)
+    transl = (
+        _as_tensor(transl).float()
+        if transl is not None
+        else torch.zeros((int(body_pose.shape[-2]), 3), dtype=torch.float32)
+    )
+    betas = _as_tensor(smpl_incam.get("betas")).float()
+
+    if body_pose.ndim == 2:
+        body_pose = body_pose[None, ...]
+    if global_orient.ndim == 2:
+        global_orient = global_orient[None, ...]
+    if transl.ndim == 2:
+        transl = transl[None, ...]
+    if betas.ndim == 1:
+        betas = betas[None, ...]
+    elif betas.ndim == 2:
+        betas = betas[None, ...]
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model_mesh = SmplxLite().to(device)
+
+    betas_in = (
+        betas[:, frame_ids] if (betas.ndim == 3 and betas.shape[1] >= int(frame_ids.max(initial=0) + 1)) else betas
+    )
+
+    with torch.no_grad():
+        verts_cam = model_mesh(
+            body_pose[:, frame_ids].to(device),
+            betas_in.to(device),
+            global_orient[:, frame_ids].to(device),
+            transl[:, frame_ids].to(device),
+        ).squeeze(0)
+    verts_cam_np = verts_cam.detach().cpu().numpy()  # (F', V, 3)
+    K_np = _as_tensor(K_fullimg[frame_ids]).detach().cpu().numpy()  # (F', 3, 3)
+
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    out_mp4_path.parent.mkdir(parents=True, exist_ok=True)
+    writer = cv2.VideoWriter(str(out_mp4_path), fourcc, fps_out, (int(w_in), int(h_in)))
+    if not writer.isOpened():
+        cap.release()
+        raise RuntimeError(f"Unable to create VideoWriter for: {out_mp4_path}")
+
+    alpha = 0.65
+    kernel = np.ones((5, 5), np.uint8)
+    try:
+        # Read sequentially and only render selected frames (avoid random seeks).
+        want = set(int(x) for x in frame_ids.tolist())
+        next_out = 0
+        frame_idx = 0
+        while next_out < int(frame_ids.shape[0]):
+            ok, frame = cap.read()
+            if not ok:
+                break
+            if frame_idx not in want:
+                frame_idx += 1
+                continue
+
+            verts = verts_cam_np[next_out]
+            K = K_np[next_out]
+            next_out += 1
+            frame_idx += 1
+
+            # Project dense vertex cloud to a depth map in image space.
+            z = verts[:, 2].astype(np.float32)
+            valid = z > 1e-6
+            if not np.any(valid):
+                writer.write(frame)
+                continue
+            x = verts[valid, 0].astype(np.float32)
+            y = verts[valid, 1].astype(np.float32)
+            z = z[valid]
+            u = (x / z) * float(K[0, 0]) + float(K[0, 2])
+            v = (y / z) * float(K[1, 1]) + float(K[1, 2])
+            ui = np.rint(u).astype(np.int32)
+            vi = np.rint(v).astype(np.int32)
+            in_img = (ui >= 0) & (ui < int(w_in)) & (vi >= 0) & (vi < int(h_in))
+            if not np.any(in_img):
+                writer.write(frame)
+                continue
+            ui = ui[in_img]
+            vi = vi[in_img]
+            z = z[in_img].astype(np.float32)
+
+            idx = (vi.astype(np.int64) * int(w_in) + ui.astype(np.int64)).astype(np.int64)
+            depth_flat = np.full(int(h_in) * int(w_in), np.inf, dtype=np.float32)
+            np.minimum.at(depth_flat, idx, z)
+            depth = depth_flat.reshape((int(h_in), int(w_in)))
+
+            valid_depth = np.isfinite(depth)
+            if not np.any(valid_depth):
+                writer.write(frame)
+                continue
+
+            mask_u8 = (valid_depth.astype(np.uint8) * 255)
+            mask_u8 = cv2.morphologyEx(mask_u8, cv2.MORPH_CLOSE, kernel, iterations=2)
+            mask = mask_u8 > 0
+            if not np.any(mask):
+                writer.write(frame)
+                continue
+
+            d_valid = depth[valid_depth]
+            dmin = float(np.percentile(d_valid, 5))
+            dmax = float(np.percentile(d_valid, 95))
+            if not (dmax > dmin):
+                dmin = float(d_valid.min())
+                dmax = float(d_valid.max() + 1e-3)
+
+            depth_clamped = depth.copy()
+            depth_clamped[~valid_depth] = dmax
+            depth_clamped = np.clip(depth_clamped, dmin, dmax)
+            depth_norm = (depth_clamped - dmin) / (dmax - dmin + 1e-6)
+            intensity = 0.92 - 0.42 * depth_norm  # nearer -> brighter
+            body = np.clip(intensity * 255.0, 0, 255).astype(np.uint8)
+            overlay = np.stack([body, body, body], axis=-1)
+
+            out = frame.copy()
+            out[mask] = (out[mask].astype(np.float32) * (1.0 - alpha) + overlay[mask].astype(np.float32) * alpha).astype(
+                np.uint8
+            )
+
+            edges = cv2.Canny(mask_u8, 60, 160)
+            out[edges > 0] = (255, 255, 255)
+
+            writer.write(out)
+    finally:
+        cap.release()
+        writer.release()
+
+    return {
+        "ok": True,
+        "preview_mp4": str(out_mp4_path),
+        "fps_in": fps_in,
+        "fps_out": fps_out,
+        "stride": int(stride),
+        "frames_out": int(frame_ids.shape[0]),
+        "layout": "incam_overlay",
+    }
+
+
+def run_gvhmr(
+    video_path: Path,
+    output_dir: Path,
+    *,
+    static_cam: bool,
+    use_dpvo: bool,
+    f_mm: int | None,
+    skip_render: bool = False,
+) -> dict[str, Any]:
+    gvhmr_root = _resolve_gvhmr_root()
+    demo_script = gvhmr_root / "tools" / "demo" / "demo.py"
+    if (not gvhmr_root.exists()) or (not demo_script.exists()):
+        checked = "\n".join(f"- {p}" for p in _candidate_gvhmr_roots())
         raise FileNotFoundError(
             "GVHMR repo not found. Clone into external/gvhmr or set GVHMR_ROOT.\n"
-            f"Expected: {gvhmr_root}"
+            f"Expected: {gvhmr_root}\n"
+            "Checked:\n"
+            f"{checked}"
         )
     _ensure_checkpoints(gvhmr_root, require_dpvo=bool(use_dpvo))
 
@@ -756,8 +1091,11 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
     # Native mesh rendering:
     # - If `GVHMR_NATIVE_RENDER` is explicitly set, honor it.
     # - Otherwise, auto-enable it when `pytorch3d.renderer` is importable.
-    enable_native_render = _env_bool("GVHMR_NATIVE_RENDER", default=_can_import_pytorch3d_renderer())
-    if not enable_native_render:
+    # - If skip_render is requested, skip render setup entirely.
+    enable_native_render = False if skip_render else _env_bool("GVHMR_NATIVE_RENDER", default=_can_import_pytorch3d_renderer())
+    if skip_render:
+        cmd.append("--skip_render")
+    elif not enable_native_render:
         # Requires our patched GVHMR demo that supports skipping rendering (avoids pytorch3d renderer dependency).
         cmd.append("--skip_render")
     if static_cam:
@@ -781,10 +1119,40 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         env.setdefault("GVHMR_RENDER_INCAM", "1")
         # Render extra global views (front/side) so the Studio UI can offer a view toggle.
         env.setdefault("GVHMR_RENDER_EXTRA_VIEWS", "1")
-        # Prevent coarse-rasterizer bin overflow artifacts (black/flicker frames) in global views.
-        # `bin_size=0` uses naive rasterization, which is slower but stable for preview generation.
-        env.setdefault("GVHMR_P3D_BIN_SIZE", "0")
-        env.setdefault("GVHMR_P3D_MAX_FACES_PER_BIN", "1000000")
+        # PyTorch3D's coarse rasterizer can overflow its per-bin face budget, which shows up as
+        # missing/black fragments in the rendered mesh. Increase the budget, but keep coarse
+        # rasterization enabled for speed.
+        #
+        # If you see "Bin size was too small..." warnings or black flicker frames again, set:
+        #   GVHMR_P3D_BIN_SIZE=0
+        # to force naive rasterization (slower, but very robust).
+        env.setdefault("GVHMR_P3D_BIN_SIZE", "64")
+        env.setdefault("GVHMR_P3D_MAX_FACES_PER_BIN", "50000")
+
+    # GVHMR's demo script uses ffmpeg-python which shells out to a binary named `ffmpeg`.
+    # Some environments (notably Pegasus compute nodes) do not have a system ffmpeg on PATH.
+    # We vendor a tiny shim directory with an `ffmpeg` executable (symlink or copy) so the demo
+    # can merge videos without requiring system-level packages.
+    ffmpeg_cmd = _resolve_ffmpeg_cmd()
+    if ffmpeg_cmd and not shutil.which("ffmpeg"):
+        shim_dir = output_dir / "_ffmpeg_shim"
+        try:
+            shim_dir.mkdir(parents=True, exist_ok=True)
+            shim_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+            shim_path = shim_dir / shim_name
+            if not shim_path.exists():
+                src = Path(ffmpeg_cmd[0])
+                try:
+                    os.symlink(str(src), str(shim_path))
+                except Exception:
+                    try:
+                        shutil.copy2(src, shim_path)
+                        shim_path.chmod(0o755)
+                    except Exception:
+                        pass
+            env["PATH"] = str(shim_dir) + os.pathsep + env.get("PATH", "")
+        except Exception:
+            pass
 
     # The Windows bootstrap installs a minimal `external/gvhmr/pytorch3d` stub so GVHMR can
     # run inference without the full PyTorch3D renderer. When native rendering is enabled
@@ -799,7 +1167,7 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
             stub_backup.rename(stub_dir)
         except Exception:
             pass
-    if enable_native_render and stub_dir.exists() and stub_dir.is_dir():
+    if not skip_render and enable_native_render and stub_dir.exists() and stub_dir.is_dir():
         try:
             if stub_backup.exists():
                 shutil.rmtree(stub_backup)
@@ -860,39 +1228,93 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
     rendered_global_front = results_path.parent / "2_global_front.mp4"
     rendered_global_side = results_path.parent / "2_global_side.mp4"
 
+    # If render is disabled, skip fallback rendering and return only pose outputs.
+    render_errors: dict[str, str] | None = None
+    fallback_render_debug: dict[str, Any] = {}
+
+    if not skip_render and (not enable_native_render):
+        render_errors = {}
+        if not rendered_global.exists():
+            try:
+                out = _render_gvhmr_global_preview(video_path, results_path, rendered_global, yaw_deg=45.0)
+                fallback_render_debug["global45"] = out.get("debug", None)
+            except Exception as exc:  # noqa: BLE001
+                render_errors["global45"] = f"{type(exc).__name__}: {exc}"
+
+        if not rendered_global_front.exists():
+            try:
+                out = _render_gvhmr_global_preview(video_path, results_path, rendered_global_front, yaw_deg=0.0)
+                fallback_render_debug["global_front"] = out.get("debug", None)
+            except Exception as exc:  # noqa: BLE001
+                render_errors["global_front"] = f"{type(exc).__name__}: {exc}"
+
+        if not rendered_global_side.exists():
+            try:
+                out = _render_gvhmr_global_preview(video_path, results_path, rendered_global_side, yaw_deg=90.0)
+                fallback_render_debug["global_side"] = out.get("debug", None)
+            except Exception as exc:  # noqa: BLE001
+                render_errors["global_side"] = f"{type(exc).__name__}: {exc}"
+
+        if not rendered_incam.exists():
+            try:
+                out = _render_gvhmr_incam_overlay(video_path, results_path, rendered_incam)
+                fallback_render_debug["incam_overlay"] = {
+                    "ok": bool(out.get("ok", True)),
+                    "stride": out.get("stride", None),
+                    "frames_out": out.get("frames_out", None),
+                    "fps_out": out.get("fps_out", None),
+                }
+            except Exception as exc:  # noqa: BLE001
+                render_errors["incam"] = f"{type(exc).__name__}: {exc}"
+
     preview_path = rendered_global if rendered_global.exists() else (output_dir / f"{video_path.stem}_gvhmr_preview.mp4")
     preview = None
     preview_error = None
-    if preview_path == rendered_global:
-        preview = {"ok": True, "preview_mp4": str(preview_path), "source": "gvhmr_native_render"}
+    if preview_path.exists():
+        preview = {
+            "ok": True,
+            "preview_mp4": str(preview_path),
+            "source": "gvhmr_native_render" if enable_native_render else "han_fallback_render",
+        }
     else:
+        # Last-resort fallback to ensure the UI never shows an empty preview panel.
         try:
-            preview = _render_gvhmr_preview(video_path, results_path, preview_path)
+            out = _render_gvhmr_global_preview(video_path, results_path, preview_path, yaw_deg=45.0)
+            if "global45" not in fallback_render_debug:
+                fallback_render_debug["global45"] = out.get("debug", None)
+            if preview_path.exists():
+                preview = {
+                    "ok": True,
+                    "preview_mp4": str(preview_path),
+                    "source": "han_fallback_render",
+                }
         except Exception as exc:  # noqa: BLE001
             preview = None
             preview_error = f"{type(exc).__name__}: {exc}"
 
-    # Safari/WebKit can look laggy if MP4s have sparse keyframes or aren't "faststart".
-    # Keep the input-normalized video as a cheap remux, but re-encode previews for responsive seeks.
-    faststart: dict[str, bool] = {
-        "input_norm": _faststart_mp4(rendered_input_norm) if rendered_input_norm.exists() else False,
-    }
     optimized: dict[str, bool] = {}
-    for label, path in (
-        ("incam", rendered_incam),
-        ("global45", rendered_global),
-        ("global_front", rendered_global_front),
-        ("global_side", rendered_global_side),
-        ("preview", preview_path),
-    ):
-        if not path.exists():
-            optimized[label] = False
-            continue
-        did_opt = _optimize_preview_mp4_for_webkit(path)
-        optimized[label] = did_opt
-        # Fallback: even if re-encode fails, at least faststart remux for smoother buffering.
-        if not did_opt:
-            faststart[label] = _faststart_mp4(path)
+    faststart: dict[str, bool] = {}
+    if not skip_render:
+        # Safari/WebKit can look laggy if MP4s have sparse keyframes or aren't "faststart".
+        # Keep the input-normalized video as a cheap remux, but re-encode previews for responsive seeks.
+        faststart = {
+            "input_norm": _faststart_mp4(rendered_input_norm) if rendered_input_norm.exists() else False,
+        }
+        for label, path in (
+            ("incam", rendered_incam),
+            ("global45", rendered_global),
+            ("global_front", rendered_global_front),
+            ("global_side", rendered_global_side),
+            ("preview", preview_path),
+        ):
+            if not path.exists():
+                optimized[label] = False
+                continue
+            did_opt = _optimize_preview_mp4_for_webkit(path)
+            optimized[label] = did_opt
+            # Fallback: even if re-encode fails, at least faststart remux for smoother buffering.
+            if not did_opt:
+                faststart[label] = _faststart_mp4(path)
 
     meta = {
         "ok": True,
@@ -902,6 +1324,8 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         "gvhmr_log": str(gvhmr_log),
         "preview_mp4": str(preview_path) if preview_path.exists() else None,
         "preview_error": preview_error,
+        "fallback_render_errors": render_errors,
+        "fallback_render_debug": fallback_render_debug if fallback_render_debug else None,
         "native_render": bool(enable_native_render),
         "native_render_global_mp4": str(rendered_global) if rendered_global.exists() else None,
         "native_render_incam_mp4": str(rendered_incam) if rendered_incam.exists() else None,
@@ -929,6 +1353,7 @@ def run_gvhmr(video_path: Path, output_dir: Path, *, static_cam: bool, use_dpvo:
         "preview_global_side_mp4_path": str(rendered_global_side) if rendered_global_side.exists() else None,
         "input_norm_mp4_path": str(rendered_input_norm) if rendered_input_norm.exists() else None,
         "preview_error": preview_error,
+        "fallback_render_errors": render_errors if render_errors else None,
     }
 
 
@@ -939,6 +1364,7 @@ def main() -> None:
     parser.add_argument("--static-cam", action="store_true", help="Skip DPVO (recommended for static camera)")
     parser.add_argument("--use-dpvo", action="store_true", help="Enable DPVO visual odometry")
     parser.add_argument("--f-mm", type=int, default=None, help="Focal length in mm for fullframe camera")
+    parser.add_argument("--skip_render", action="store_true", help="Skip preview rendering and directly return pose outputs")
     args = parser.parse_args()
 
     video = Path(args.video).expanduser().resolve()
@@ -953,6 +1379,7 @@ def main() -> None:
             static_cam=bool(args.static_cam),
             use_dpvo=bool(args.use_dpvo),
             f_mm=args.f_mm,
+            skip_render=bool(args.skip_render),
         )
     except Exception as exc:
         # Best-effort: emit structured JSON so parent processes can surface a useful error.

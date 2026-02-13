@@ -1,0 +1,49 @@
+# Minimal GVHMR runtime dependencies for the han-platform pose worker (Linux).
+#
+# Goal: enable GVHMR native rendering (PyTorch3D) on headless GPU nodes without pulling
+# in training-time / notebook-time extras which can fail to build (for example chumpy).
+#
+# This is intentionally kept separate from GVHMR's upstream `requirements.txt` so the
+# platform can stay operational even when the upstream list changes.
+
+--extra-index-url https://download.pytorch.org/whl/cu121
+
+# PyTorch (matches the published PyTorch3D wheel we use below).
+torch==2.3.0+cu121
+torchvision==0.18.0+cu121
+timm==0.9.12
+
+# Lightning + Hydra
+lightning==2.3.0
+hydra-core==1.3.0
+hydra-zen
+hydra_colorlog
+rich
+
+# Common utilities
+numpy==1.23.5
+opencv-python-headless<4.12
+ffmpeg-python
+scikit-image
+termcolor
+einops
+imageio==2.34.1
+imageio-ffmpeg
+av==13.0.0
+joblib
+tqdm
+yacs
+colorlog
+
+# 3D / SMPL-X
+trimesh
+smplx
+
+# 2D pose + tracking (GVHMR preprocess)
+ultralytics==8.2.42
+cython_bbox
+lapx
+
+# Renderer (prebuilt wheel for py310 + cu121 + torch 2.3.0).
+pytorch3d @ https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu121_pyt230/pytorch3d-0.7.6-cp310-cp310-linux_x86_64.whl
+

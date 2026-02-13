@@ -10,14 +10,16 @@ Humanoid Network platform scaffolding: Next.js web app, FastAPI backend, XGen/XM
    - Web: `http://localhost:3000`
    - API health: `http://localhost:8000/health`
 
-Fastest end-to-end (Mac control-plane + Windows GPU worker):
-1. On Mac: `./scripts/mac/run_full_e2e.sh`
-2. When it prints your Mac IP, run the printed Windows command:
-   - `powershell -ExecutionPolicy Bypass -File .\\scripts\\windows\\one_click_gpu_worker.ps1 -MacIp <MAC_IP> -IsaacSimPath C:\\isaacsim`
-
-Fastest REAL end-to-end (GVHMR + Isaac Lab PPO, requires extra GVHMR checkpoints on Windows):
-1. On Mac: `./scripts/mac/run_full_e2e_real.sh`
-2. When it prints your Mac IP, run the printed Windows command:
+Default launcher (Pegasus-first, Windows fallback):
+1. Start the Pegasus worker if reachable, otherwise fall back to Windows GPU SSH.
+2. Set either `PEGASUS_HOST` or `WINDOWS_GPU_IP` and run:
+   - `PEGASUS_HOST=<pegasus_host> WINDOWS_GPU_IP=<windows_ip> ./scripts/mac/run_full_e2e_real_ssh.sh`
+3. If Pegasus is not available, this still works with Windows only:
+   - `WINDOWS_GPU_IP=<windows_ip> ./scripts/mac/run_full_e2e_real_ssh.sh`
+4. For GVHMR-only smoke test workflows, use:
+   - `WINDOWS_GPU_IP=<windows_ip> ./scripts/mac/run_gvhmr_studio_ssh.sh`
+5. If you prefer legacy manual bootstrap, keep using:
+   - `./scripts/mac/run_full_e2e_real.sh`
    - `powershell -ExecutionPolicy Bypass -File .\\scripts\\windows\\one_click_gpu_worker_real.ps1 -MacIp <MAC_IP> -IsaacSimPath C:\\isaacsim -SetupGVHMR -DownloadLightCheckpoints`
 
 What to test (golden path):
@@ -32,6 +34,18 @@ Start here:
 - `docs/ISAACLAB_WINDOWS_SETUP.md`
 - `docs/GPU_PC_SETUP.md`
 - `docs/FIRST_PROMPT_GPU_PC.md`
+
+## Dual Worker Setup (Pegasus + Windows fallback)
+If you want motion recovery available while your home gaming PC is off, add a Pegasus worker and keep Windows as fallback:
+- `docs/PEGASUS_DUAL_WORKER_SETUP.md`
+- `scripts/mac/bootstrap_pegasus_control_plane_ssh.sh`
+- `scripts/mac/start_pegasus_control_plane_ssh.sh`
+- `scripts/mac/status_pegasus_control_plane_ssh.sh`
+- `scripts/mac/stop_pegasus_control_plane_ssh.sh`
+- `scripts/mac/tail_pegasus_control_plane_logs_ssh.sh`
+- `scripts/mac/start_pegasus_worker_ssh.sh`
+- `scripts/mac/stop_pegasus_worker_ssh.sh`
+- `scripts/mac/tail_pegasus_worker_logs_ssh.sh`
 
 Legacy Isaac Gym/PhysHOI scripts remain under `scripts/gpu/` but assume Linux and are not the recommended path.
 

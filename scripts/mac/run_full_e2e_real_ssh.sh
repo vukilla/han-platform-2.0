@@ -3,11 +3,12 @@ set -euo pipefail
 
 # One-command REAL end-to-end run that:
 # - starts the Mac control-plane (docker compose)
-# - starts the Windows GPU worker via SSH
+# - starts a GPU worker via SSH, preferring Pegasus if configured and falling back to Windows
 # - runs the REAL smoke (GVHMR + Isaac Lab PPO)
 #
 # Usage:
 #   WINDOWS_GPU_IP=192.168.2.77 ./scripts/mac/run_full_e2e_real_ssh.sh [/path/to/video.mp4]
+#   PEGASUS_HOST=user@pegasus-host ./scripts/mac/run_full_e2e_real_ssh.sh [/path/to/video.mp4]
 #
 # Notes:
 # - GVHMR requires licensed SMPL-X model files on the GPU PC (see docs/GVHMR.md).
@@ -28,23 +29,40 @@ if [[ -z "$VIDEO_PATH" ]]; then
 fi
 
 WINDOWS_IP="${WINDOWS_GPU_IP:-}"
-if [[ -z "$WINDOWS_IP" ]]; then
-  echo "Missing WINDOWS_GPU_IP. Example:" >&2
-  echo "  WINDOWS_GPU_IP=192.168.2.77 $ROOT_DIR/scripts/mac/run_full_e2e_real_ssh.sh" >&2
+PEGASUS_HOST="${PEGASUS_HOST:-}"
+if [[ -z "$WINDOWS_IP" && -z "$PEGASUS_HOST" ]]; then
+  echo "Missing worker connection target. Set one of:" >&2
+  echo "  PEGASUS_HOST=<host> $ROOT_DIR/scripts/mac/run_full_e2e_real_ssh.sh" >&2
+  echo "  WINDOWS_GPU_IP=<windows_ip> $ROOT_DIR/scripts/mac/run_full_e2e_real_ssh.sh" >&2
   exit 1
 fi
 
-echo "== Full REAL E2E (Mac + Windows GPU worker over SSH) =="
+echo "== Full REAL E2E (Mac + GPU worker over SSH) =="
 echo "Repo:    $ROOT_DIR"
 echo "Video:   $VIDEO_PATH"
-echo "Win GPU: $WINDOWS_IP"
+echo "Win GPU: ${WINDOWS_IP:-<not set>}"
+echo "Pegasus: ${PEGASUS_HOST:-<not set>}"
+if [[ -n "$PEGASUS_HOST" ]]; then
+  echo "Worker preference: Pegasus first, Windows fallback."
+else
+  echo "Worker preference: Windows."
+fi
 echo ""
 
 "$ROOT_DIR/scripts/mac/control_plane_up.sh"
 
 echo ""
-echo "-- Starting Windows GPU worker --"
-REAL_WORKER=1 "$ROOT_DIR/scripts/mac/start_windows_gpu_worker_ssh.sh" "$WINDOWS_IP"
+echo "-- Starting GPU worker (preferred: Pegasus, fallback: Windows) --"
+start_epoch="$(date +%s)"
+windows_started=0
+if [[ -n "$PEGASUS_HOST" ]]; then
+  HAN_WORKER_SOURCE="pegasus" \
+  WORKER_QUEUES="gpu" \
+  "$ROOT_DIR/scripts/mac/start_pegasus_worker_ssh.sh" "$PEGASUS_HOST"
+elif [[ -n "$WINDOWS_IP" ]]; then
+  REAL_WORKER=1 "$ROOT_DIR/scripts/mac/start_windows_gpu_worker_ssh.sh" "$WINDOWS_IP"
+  windows_started=1
+fi
 
 echo ""
 echo "-- Waiting for GPU worker (Celery) --"
@@ -58,17 +76,29 @@ while true; do
   fi
 
   workers_json="$(curl -sS "http://localhost:8000/ops/workers?timeout=2.0" || true)"
-  ok="$(WORKERS_JSON="$workers_json" python - <<'PY'
-import json,os
-try:
-  d=json.loads(os.environ.get("WORKERS_JSON") or "{}")
-  print("1" if d.get("ok") and d.get("has_gpu_queue") is True else "0")
-except Exception:
-  print("0")
-PY
-)"
-  if [[ "$ok" == "1" ]]; then
+  ok_pegasus="$(WORKERS_JSON="$workers_json" python -c 'import json,os; d=json.loads(os.environ.get("WORKERS_JSON") or "{}"); print("1" if d.get("ok") and d.get("has_gpu_queue_pegasus", False) else "0")')"
+  ok_windows="$(WORKERS_JSON="$workers_json" python -c 'import json,os; d=json.loads(os.environ.get("WORKERS_JSON") or "{}"); print("1" if d.get("ok") and d.get("has_gpu_queue_windows", False) else "0")')"
+  ok_legacy="$(WORKERS_JSON="$workers_json" python -c 'import json,os; d=json.loads(os.environ.get("WORKERS_JSON") or "{}"); print("1" if d.get("ok") and d.get("has_gpu_queue", False) else "0")')"
+
+  if [[ "$ok_pegasus" == "1" ]] || [[ "$ok_windows" == "1" ]]; then
     echo "GPU worker detected."
+    break
+  fi
+
+  if [[ -n "$WINDOWS_IP" && "$windows_started" -eq 0 ]]; then
+    if (( now - start_epoch > 20 )); then
+      if [[ -n "$PEGASUS_HOST" ]]; then
+        echo "No Pegasus worker detected, starting Windows GPU worker fallback."
+      else
+        echo "Starting Windows GPU worker."
+      fi
+      REAL_WORKER=1 "$ROOT_DIR/scripts/mac/start_windows_gpu_worker_ssh.sh" "$WINDOWS_IP"
+      windows_started=1
+    fi
+  fi
+
+  if [[ "$ok_legacy" == "1" ]]; then
+    echo "Legacy GPU worker detected, proceeding."
     break
   fi
   sleep 2
@@ -76,4 +106,3 @@ done
 
 echo ""
 "$ROOT_DIR/scripts/smoke_e2e_with_gpu_real.sh" "$VIDEO_PATH"
-

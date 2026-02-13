@@ -3,7 +3,8 @@ set -euo pipefail
 
 # One-command GVHMR-only run that:
 # - starts the Mac control-plane (docker compose)
-# - starts the Windows pose worker via SSH (queue: pose)
+# - starts a pose worker via SSH, preferring Pegasus if configured
+# - falls back to the Windows pose worker if Pegasus is unavailable
 # - runs the motion-recovery smoke test (upload -> GVHMR -> preview)
 #
 # Usage:
@@ -31,24 +32,42 @@ if [[ -z "$VIDEO_PATH" ]]; then
 fi
 
 WINDOWS_IP="${WINDOWS_GPU_IP:-}"
-if [[ -z "$WINDOWS_IP" ]]; then
-  echo "Missing WINDOWS_GPU_IP. Example:" >&2
-  echo "  WINDOWS_GPU_IP=192.168.2.77 $ROOT_DIR/scripts/mac/run_gvhmr_studio_ssh.sh" >&2
+PEGASUS_HOST="${PEGASUS_HOST:-}"
+
+if [[ -z "$WINDOWS_IP" && -z "$PEGASUS_HOST" ]]; then
+  echo "Missing worker connection target. Set one of:" >&2
+  echo "  PEGASUS_HOST=<host> $ROOT_DIR/scripts/mac/run_gvhmr_studio_ssh.sh" >&2
+  echo "  WINDOWS_GPU_IP=<windows_ip> $ROOT_DIR/scripts/mac/run_gvhmr_studio_ssh.sh" >&2
   exit 1
 fi
 
-echo "== GVHMR Studio (Mac + Windows pose worker over SSH) =="
+if [[ -n "$PEGASUS_HOST" ]]; then
+  echo "Preferring Pegasus worker, with optional Windows fallback."
+else
+  echo "Pegasus not configured, using Windows worker."
+fi
+
+echo "== GVHMR Studio (Mac + pose worker over SSH) =="
 echo "Repo:    $ROOT_DIR"
 echo "Video:   $VIDEO_PATH"
-echo "Win GPU: $WINDOWS_IP"
+echo "Win GPU: ${WINDOWS_IP:-<not set>}"
+echo "Pegasus: ${PEGASUS_HOST:-<not set>}"
 echo ""
 
 "$ROOT_DIR/scripts/mac/control_plane_up.sh"
 
 echo ""
-echo "-- Starting Windows pose worker (GVHMR) --"
-# Use the REAL one-click worker so it can bootstrap GVHMR if needed. Consume only the pose queue.
-REAL_WORKER=1 SETUP_GVHMR=1 WORKER_QUEUES=pose "$ROOT_DIR/scripts/mac/start_windows_gpu_worker_ssh.sh" "$WINDOWS_IP"
+echo "-- Starting pose worker (preferred: Pegasus, fallback: Windows) --"
+start_epoch="$(date +%s)"
+windows_started=0
+if [[ -n "$PEGASUS_HOST" ]]; then
+  HAN_WORKER_SOURCE="pegasus" \
+  WORKER_QUEUES="pose" \
+  "$ROOT_DIR/scripts/mac/start_pegasus_worker_ssh.sh" "$PEGASUS_HOST"
+elif [[ -n "$WINDOWS_IP" ]]; then
+  REAL_WORKER=1 SETUP_GVHMR=1 WORKER_SOURCE=windows WORKER_QUEUES=pose "$ROOT_DIR/scripts/mac/start_windows_gpu_worker_ssh.sh" "$WINDOWS_IP"
+  windows_started=1
+fi
 
 echo ""
 echo "-- Waiting for pose worker (Celery) --"
@@ -61,22 +80,29 @@ while true; do
   fi
 
   workers_json="$(curl -sS "http://localhost:8000/ops/workers?timeout=2.0" || true)"
-  ok="$(WORKERS_JSON="$workers_json" python - <<'PY'
-import json,os
-try:
-  d=json.loads(os.environ.get("WORKERS_JSON") or "{}")
-  print("1" if d.get("ok") and d.get("has_pose_queue") is True else "0")
-except Exception:
-  print("0")
-PY
-)"
-  if [[ "$ok" == "1" ]]; then
+  ok_pegasus="$(WORKERS_JSON="$workers_json" python -c 'import json,os; d=json.loads(os.environ.get("WORKERS_JSON") or "{}"); print("1" if d.get("ok") and d.get("has_pose_queue_pegasus", False) else "0")')"
+  ok_windows="$(WORKERS_JSON="$workers_json" python -c 'import json,os; d=json.loads(os.environ.get("WORKERS_JSON") or "{}"); print("1" if d.get("ok") and d.get("has_pose_queue_windows", False) else "0")')"
+
+  if [[ "$ok_pegasus" == "1" ]] || [[ "$ok_windows" == "1" ]]; then
     echo "Pose worker detected."
     break
   fi
+
+  now=$(date +%s)
+  if [[ -n "$WINDOWS_IP" && "$windows_started" -eq 0 ]]; then
+    if (( now - start_epoch > 20 )); then
+      if [[ -n "$PEGASUS_HOST" ]]; then
+        echo "No Pegasus worker detected, starting Windows pose worker fallback."
+      else
+        echo "Starting Windows pose worker."
+      fi
+      REAL_WORKER=1 SETUP_GVHMR=1 WORKER_SOURCE=windows WORKER_QUEUES=pose "$ROOT_DIR/scripts/mac/start_windows_gpu_worker_ssh.sh" "$WINDOWS_IP"
+      windows_started=1
+    fi
+  fi
+
   sleep 2
 done
 
 echo ""
 "$ROOT_DIR/scripts/smoke_motion_recovery.sh" "$VIDEO_PATH"
-

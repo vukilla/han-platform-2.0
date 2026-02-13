@@ -4,6 +4,8 @@ param(
 
   [string]$IsaacSimPath = "C:\\isaacsim",
 
+  [string]$WorkerSource = "windows",
+
   # Also bootstrap GVHMR + its Windows deps so XGen can run `pose_estimator=gvhmr`.
   [switch]$SetupGVHMR,
 
@@ -28,6 +30,7 @@ Write-Host "== One-click REAL GPU worker (Windows) ==" -ForegroundColor Cyan
 Write-Host "Repo root: $repoRoot"
 Write-Host "Mac IP:    $MacIp"
 Write-Host "Isaac Sim: $IsaacSimPath"
+Write-Host "Worker source: $WorkerSource"
 Write-Host ""
 
 if (-not (Test-Path $oneClick)) {
@@ -66,7 +69,7 @@ if (-not $Queues) {
 }
 
 Write-Host "-- Bootstrapping + starting GPU worker --" -ForegroundColor Cyan
-powershell -NoProfile -ExecutionPolicy Bypass -File $oneClick -MacIp $MacIp -IsaacSimPath $IsaacSimPath -Queues $Queues
+powershell -NoProfile -ExecutionPolicy Bypass -File $oneClick -MacIp $MacIp -IsaacSimPath $IsaacSimPath -WorkerSource $WorkerSource -Queues $Queues
 
 Write-Host ""
 Write-Host "Next (Mac): run the REAL smoke test:" -ForegroundColor Green

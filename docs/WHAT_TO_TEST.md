@@ -24,7 +24,7 @@ Optional one-command smoke tests:
 # CPU-only golden path (upload -> XGen -> dataset)
 /Users/robertvukosa/Downloads/Python/han-platform/scripts/smoke_local_e2e.sh
 
-# Full golden path including GPU-queue XMimic (requires Windows GPU worker running)
+# Full golden path including GPU-queue XMimic (requires a GPU worker)
 /Users/robertvukosa/Downloads/Python/han-platform/scripts/smoke_e2e_with_gpu.sh
 
 # REAL GPU golden path:
@@ -32,8 +32,8 @@ Optional one-command smoke tests:
 # - XMimic on GPU queue with Isaac Lab teacher PPO (exports .pt checkpoint, uploaded to MinIO)
 #
 # Requires:
-# - Windows GPU worker running
-# - GVHMR bootstrapped on Windows (see docs/GVHMR.md)
+# - Either Pegasus or Windows GPU worker
+# - GVHMR bootstrapped on active worker (see docs/GVHMR.md)
 /Users/robertvukosa/Downloads/Python/han-platform/scripts/smoke_e2e_with_gpu_real.sh
 ```
 
@@ -41,8 +41,7 @@ Optional one-command smoke tests:
 
 This is the simplest “phone video -> 3D motion” UX loop.
 
-1. Ensure the Windows GPU worker is running (see below).
-1. One-time: upload the licensed SMPL-X model file (`SMPLX_NEUTRAL.npz`) so GVHMR can run end-to-end:
+1. Upload the licensed SMPL-X model file (`SMPLX_NEUTRAL.npz`) so GVHMR can run end-to-end:
 1. Open `http://localhost:3000/studio`
 1. If it shows `SMPL-X model missing`, upload the `.npz` file (see `docs/GVHMR.md` for where to download it).
 1. Open `http://localhost:3000/studio`
@@ -56,19 +55,19 @@ This is the simplest “phone video -> 3D motion” UX loop.
 Notes:
 - `http://localhost:3000/gvhmr` is still available as a troubleshooting/setup page.
 
-Fastest “do it for me” launch (GVHMR-only, recommended):
+Fastest “do it for me” launch (GVHMR-only, Pegasus-first with Windows fallback):
 
 ```bash
-WINDOWS_GPU_IP=<windows_ip> /Users/robertvukosa/Downloads/Python/han-platform/scripts/mac/run_gvhmr_studio_ssh.sh
+PEGASUS_HOST=<pegasus_host> WINDOWS_GPU_IP=<windows_ip> /Users/robertvukosa/Downloads/Python/han-platform/scripts/mac/run_gvhmr_studio_ssh.sh
 ```
 
 This will:
 1. Start the Mac control-plane (docker compose)
-1. Start/restart the Windows pose worker over SSH (queue: `pose`)
+1. Start/restart a pose worker over SSH (queue: `pose`), preferring Pegasus and falling back to Windows
 1. Run the motion-recovery smoke test (upload -> GVHMR -> preview)
 1. Print the `/jobs/<id>` URL to open in the browser
 
-Fastest REAL “do it for me” launch (GVHMR + Isaac Lab PPO):
+Fastest REAL “do it for me” launch (GVHMR + Isaac Lab PPO, Pegasus-first with Windows fallback):
 
 1. On Mac:
 
@@ -76,15 +75,16 @@ Fastest REAL “do it for me” launch (GVHMR + Isaac Lab PPO):
 # Optional: pass a video path. If omitted, the script uses:
 # - /Users/robertvukosa/Desktop/delivery-man-...mp4 if it exists, else
 # - assets/sample_videos/cargo_pickup_01.mp4
-/Users/robertvukosa/Downloads/Python/han-platform/scripts/mac/run_full_e2e_real.sh
+PEGASUS_HOST=<pegasus_host> WINDOWS_GPU_IP=<windows_ip> \
+ /Users/robertvukosa/Downloads/Python/han-platform/scripts/mac/run_full_e2e_real_ssh.sh [optional_video_path]
 ```
 
-2. When it prints your Mac IP, run the printed Windows command on the GPU PC.
-   - If GVHMR fails, follow `docs/GVHMR.md` to manually place the remaining checkpoints.
+2. If you are testing only Windows, omit `PEGASUS_HOST` and keep `WINDOWS_GPU_IP`:
+   - `WINDOWS_GPU_IP=<windows_ip> /Users/robertvukosa/Downloads/Python/han-platform/scripts/mac/run_full_e2e_real_ssh.sh`
 
-### Even easier: Mac triggers the Windows worker via SSH
+### Even easier: Pegasus + Windows preference via SSH launcher
 
-If you have SSH access from your Mac to the Windows GPU PC (recommended), you can do it in one command:
+If you have SSH access from your Mac to either endpoint, you can run a single command end-to-end:
 
 ```bash
 WINDOWS_GPU_IP=<windows_ip> /Users/robertvukosa/Downloads/Python/han-platform/scripts/mac/run_full_e2e_real_ssh.sh
@@ -92,7 +92,7 @@ WINDOWS_GPU_IP=<windows_ip> /Users/robertvukosa/Downloads/Python/han-platform/sc
 
 This will:
 - start the Mac control-plane (docker compose)
-- start/restart the Windows GPU worker over SSH
+- start/restart a GPU worker over SSH (Pegasus first when available)
 - run the REAL smoke (GVHMR pose + Isaac Lab PPO checkpoint)
 
 ## 1) Web UI: Upload -> XGen -> Dataset
