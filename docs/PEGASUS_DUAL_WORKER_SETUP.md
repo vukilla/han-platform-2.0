@@ -15,8 +15,8 @@ This setup makes Pegasus the primary runtime path (private control-plane + pose 
 From your Mac repo:
 
 ```bash
-export PEGASUS_HOST=dfki
-export SSH_KEY=~/.ssh/dfki_pegasus
+export PEGASUS_HOST=<pegasus_ssh_host_or_alias>
+export SSH_KEY=~/.ssh/<your_pegasus_key>
 ./scripts/mac/bootstrap_pegasus_control_plane_ssh.sh
 ```
 
@@ -30,8 +30,8 @@ This installs a user-space conda environment on Pegasus with:
 From your Mac repo:
 
 ```bash
-export PEGASUS_HOST=dfki
-export SSH_KEY=~/.ssh/dfki_pegasus
+export PEGASUS_HOST=<pegasus_ssh_host_or_alias>
+export SSH_KEY=~/.ssh/<your_pegasus_key>
 export SLURM_PARTITION=batch
 export SLURM_TIME=12:00:00
 ./scripts/mac/start_pegasus_control_plane_ssh.sh
@@ -59,8 +59,8 @@ Stop:
 From your Mac repo:
 
 ```bash
-export PEGASUS_HOST=dfki
-export SSH_KEY=~/.ssh/dfki_pegasus
+export PEGASUS_HOST=<pegasus_ssh_host_or_alias>
+export SSH_KEY=~/.ssh/<your_pegasus_key>
 export HAN_WORKER_QUEUES=pose
 export PEGASUS_LAUNCH_MODE=slurm
 export SLURM_PARTITION=RTXA6000

@@ -14,6 +14,7 @@ Default launcher (Pegasus-first, Windows fallback):
 1. Start the Pegasus worker if reachable, otherwise fall back to Windows GPU SSH.
 2. Set either `PEGASUS_HOST` or `WINDOWS_GPU_IP` and run:
    - `PEGASUS_HOST=<pegasus_host> WINDOWS_GPU_IP=<windows_ip> ./scripts/mac/run_full_e2e_real_ssh.sh`
+   - `PEGASUS_HOST` is your SSH host string or alias for Pegasus, for example `pegasus` if you added it to `~/.ssh/config`.
 3. If Pegasus is not available, this still works with Windows only:
    - `WINDOWS_GPU_IP=<windows_ip> ./scripts/mac/run_full_e2e_real_ssh.sh`
 4. For GVHMR-only smoke test workflows, use:
@@ -37,6 +38,8 @@ Start here:
 
 ## Dual Worker Setup (Pegasus + Windows fallback)
 If you want motion recovery available while your home gaming PC is off, add a Pegasus worker and keep Windows as fallback:
+- New teammate onboarding:
+- `docs/PEGASUS_ONBOARDING.md`
 - `docs/PEGASUS_DUAL_WORKER_SETUP.md`
 - `scripts/mac/bootstrap_pegasus_control_plane_ssh.sh`
 - `scripts/mac/start_pegasus_control_plane_ssh.sh`

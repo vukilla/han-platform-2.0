@@ -4,12 +4,12 @@ set -euo pipefail
 # Start a Linux worker on Pegasus over SSH.
 #
 # Usage:
-#   PEGASUS_HOST=dfki ./scripts/mac/start_pegasus_worker_ssh.sh
-#   ./scripts/mac/start_pegasus_worker_ssh.sh dfki
+#   PEGASUS_HOST=<pegasus_host_or_alias> ./scripts/mac/start_pegasus_worker_ssh.sh
+#   ./scripts/mac/start_pegasus_worker_ssh.sh <pegasus_host_or_alias>
 #
 # Optional env vars:
 # - SSH_USER (optional, if already configured in ~/.ssh/config leave empty)
-# - SSH_KEY (default: ~/.ssh/dfki_pegasus if present)
+# - SSH_KEY (auto-detects ~/.ssh/pegasus* if present)
 # - PEGASUS_REPO (default: ~/han-platform)
 # - PULL_REPO (default: 1)
 # - INSTALL_REQS (default: 0)
@@ -47,8 +47,18 @@ fi
 
 SSH_USER="${SSH_USER:-}"
 SSH_KEY="${SSH_KEY:-}"
-if [[ -z "$SSH_KEY" && -f "$HOME/.ssh/dfki_pegasus" ]]; then
-  SSH_KEY="$HOME/.ssh/dfki_pegasus"
+if [[ -z "$SSH_KEY" ]]; then
+  for candidate in \
+    "$HOME/.ssh/pegasus" \
+    "$HOME/.ssh/pegasus_ssh" \
+    "$HOME/.ssh/pegasus_key" \
+    "$HOME/.ssh/id_ed25519" \
+    "$HOME/.ssh/id_rsa"; do
+    if [[ -f "$candidate" ]]; then
+      SSH_KEY="$candidate"
+      break
+    fi
+  done
 fi
 PEGASUS_REPO="${PEGASUS_REPO:-~/han-platform}"
 PULL_REPO="${PULL_REPO:-1}"

@@ -4,8 +4,8 @@ set -euo pipefail
 # Stop the Pegasus private control-plane Slurm job.
 #
 # Usage:
-#   PEGASUS_HOST=dfki ./scripts/mac/stop_pegasus_control_plane_ssh.sh
-#   ./scripts/mac/stop_pegasus_control_plane_ssh.sh dfki
+#   PEGASUS_HOST=<pegasus_host_or_alias> ./scripts/mac/stop_pegasus_control_plane_ssh.sh
+#   ./scripts/mac/stop_pegasus_control_plane_ssh.sh <pegasus_host_or_alias>
 
 PEGASUS_HOST="${PEGASUS_HOST:-${1:-}}"
 if [[ -z "$PEGASUS_HOST" ]]; then
@@ -17,8 +17,18 @@ fi
 
 SSH_USER="${SSH_USER:-}"
 SSH_KEY="${SSH_KEY:-}"
-if [[ -z "$SSH_KEY" && -f "$HOME/.ssh/dfki_pegasus" ]]; then
-  SSH_KEY="$HOME/.ssh/dfki_pegasus"
+if [[ -z "$SSH_KEY" ]]; then
+  for candidate in \
+    "$HOME/.ssh/pegasus" \
+    "$HOME/.ssh/pegasus_ssh" \
+    "$HOME/.ssh/pegasus_key" \
+    "$HOME/.ssh/id_ed25519" \
+    "$HOME/.ssh/id_rsa"; do
+    if [[ -f "$candidate" ]]; then
+      SSH_KEY="$candidate"
+      break
+    fi
+  done
 fi
 
 PEGASUS_REPO="${PEGASUS_REPO:-~/han-platform}"
