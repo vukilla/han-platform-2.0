@@ -84,8 +84,15 @@ cd /Users/<you>/Downloads/Python/han-platform
 ./scripts/mac/start_pegasus_control_plane_ssh.sh
 ./scripts/mac/status_pegasus_control_plane_ssh.sh
 
-# start Pegasus pose worker with auto fallback behavior
-export CONTROL_PLANE_MODE=auto
+# start local port-forward tunnel (API/MinIO/Redis/Postgres) to the Pegasus control-plane
+./scripts/mac/start_pegasus_tunnel.sh
+
+# start the local web UI (web only)
+docker compose -f infra/docker-compose.yml up -d --build web
+
+# start Pegasus pose worker (connects to Pegasus control-plane)
+export CONTROL_PLANE_MODE=pegasus
+export HAN_WORKER_SOURCE=pegasus
 export HAN_WORKER_QUEUES=pose
 ./scripts/mac/start_pegasus_worker_ssh.sh
 ```
@@ -95,13 +102,13 @@ export HAN_WORKER_QUEUES=pose
 Run a quick studio smoke test:
 
 ```bash
-PEGASUS_HOST=pegasus ./scripts/mac/run_gvhmr_studio_ssh.sh
+API_URL=http://localhost:8000 WEB_URL=http://localhost:3000 ./scripts/smoke_motion_recovery.sh /path/to/video.mp4
 ```
 
 Or run full pipeline smoke (requires worker + model assets configured for your chosen worker path):
 
 ```bash
-PEGASUS_HOST=pegasus /Users/<you>/Downloads/Python/han-platform/scripts/mac/run_full_e2e_real_ssh.sh
+API_URL=http://localhost:8000 WEB_URL=http://localhost:3000 ./scripts/smoke_e2e_with_gpu_real.sh /path/to/video.mp4
 ```
 
 If Pegasus is unavailable, set only `WINDOWS_GPU_IP` and use the same `run_*_ssh.sh` scripts for fallback mode.
