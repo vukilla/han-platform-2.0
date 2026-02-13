@@ -49,6 +49,7 @@ services:
       CELERY_PREFETCH_MULTIPLIER: 1
       CELERY_TASK_ACKS_LATE: "true"
       CELERY_REJECT_ON_WORKER_LOST: "true"
+      GVHMR_ROOT: /app/external
     depends_on:
       - db
       - redis
@@ -57,6 +58,7 @@ services:
       - "8000:8000"
     volumes:
       - ../apps/api:/app
+      - ${HOST_EXTERNAL_DIR:-../external}:/app/external
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   worker:
@@ -78,12 +80,14 @@ services:
       CELERY_PREFETCH_MULTIPLIER: 1
       CELERY_TASK_ACKS_LATE: "true"
       CELERY_REJECT_ON_WORKER_LOST: "true"
+      GVHMR_ROOT: /app/external
     depends_on:
       - db
       - redis
       - minio
     volumes:
       - ../apps/api:/app
+      - ${HOST_EXTERNAL_DIR:-../external}:/app/external
     command: celery -A app.worker.celery_app worker -l info -Q cpu -c 2
 
   web:

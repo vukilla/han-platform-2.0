@@ -56,11 +56,73 @@ def _candidate_gvhmr_roots() -> list[Path]:
     roots: list[Path] = []
     env = os.environ.get("GVHMR_ROOT")
     if env:
-        roots.append(Path(env).expanduser().resolve())
+        env_root = Path(env).expanduser().resolve()
+        roots.append(env_root)
+        for rel in [
+            Path("gvhmr"),
+            Path("humanoid-projects") / "GVHMR",
+            Path("GVHMR"),
+            Path("humanoid-projects") / "gvhmr",
+        ]:
+            candidate = (env_root / rel).resolve()
+            if candidate != env_root:
+                roots.append(candidate)
 
     repo_root = _repo_root()
+    here = Path(__file__).resolve()
+    script_roots = [here.parent, here.parent.parent, here.parent.parent.parent]
+    for base in script_roots:
+        ext = base / "external"
+        roots.append(base / "external" / "gvhmr")
+        roots.append(base / "external" / "humanoid-projects" / "GVHMR")
+        roots.append(base / "external" / "GVHMR")
+        if ext.exists():
+            for rel in [
+                Path("gvhmr"),
+                Path("humanoid-projects") / "GVHMR",
+                Path("GVHMR"),
+                Path("humanoid-projects") / "gvhmr",
+            ]:
+                roots.append(ext / rel)
+
     roots.append(repo_root / "external" / "gvhmr")
     roots.append(repo_root / "external" / "humanoid-projects" / "GVHMR")
+    roots.append(repo_root / "external" / "GVHMR")
+    # Common container mount points used by docker and SSH workers.
+    for mounted_root in (
+        Path("/app"),
+        Path("/app/app"),
+        Path("/workspace"),
+        Path("/opt/han-platform"),
+        Path("/home/cheema/han-platform"),
+        Path("/home"),
+        Path("/opt"),
+    ):
+        if mounted_root.exists():
+            roots.append(mounted_root / "external" / "gvhmr")
+            roots.append(mounted_root / "external" / "humanoid-projects" / "GVHMR")
+            roots.append(mounted_root / "external" / "GVHMR")
+            external_root = mounted_root / "external"
+            if external_root.exists():
+                for rel in [
+                    Path("gvhmr"),
+                    Path("humanoid-projects") / "GVHMR",
+                    Path("GVHMR"),
+                    Path("humanoid-projects") / "gvhmr",
+                ]:
+                    roots.append(external_root / rel)
+
+    # Fallback scan for nested checkouts that may live under a non-standard mount path.
+    for scan_base in [Path("/app"), Path("/app/app"), Path("/workspace"), Path("/opt/han-platform"), Path("/home/cheema/han-platform"), Path("/home"), Path("/opt")]:
+        if not scan_base.exists():
+            continue
+        try:
+            for demo in scan_base.rglob("tools/demo/demo.py"):
+                candidate = demo.parents[2]
+                if not candidate.name.startswith(".") and candidate.is_dir():
+                    roots.append(candidate)
+        except OSError:
+            continue
 
     unique: list[Path] = []
     seen: set[str] = set()
@@ -74,22 +136,95 @@ def _candidate_gvhmr_roots() -> list[Path]:
 
 
 def _looks_like_gvhmr_repo(path: Path) -> bool:
-    return (path / "tools" / "demo" / "demo.py").exists() and (path / "hmr4d").exists()
+    """Heuristic used to locate a GVHMR checkout in different local layouts.
+
+    The repo can be mounted in different folders depending on deployment path (e.g.
+    `external/gvhmr`, `external/humanoid-projects/GVHMR`, etc.). Keep this broad
+    so valid checkouts are not rejected by strict folder layout assumptions.
+    """
+    demo_script = path / "tools" / "demo" / "demo.py"
+    if demo_script.exists():
+        return True
+
+    # Some environments only have `tools/demo/` present before the script is copied.
+    demo_dir = path / "tools" / "demo"
+    if demo_dir.is_dir():
+        return True
+
+    markers = [
+        "tools",
+        "hmr4d",
+        "hmr4d_results",
+        "hmr4d_results.pt",
+        "inputs",
+        "models",
+        "model",
+        "configs",
+        "requirements.txt",
+    ]
+    if any((path / marker).exists() for marker in markers):
+        return True
+
+    # As a final fallback, accept any non-empty directory that looks like a repo mount.
+    return len(list(path.glob("*"))) > 0
 
 
 def _resolve_gvhmr_root() -> Path:
-    for candidate in _candidate_gvhmr_roots():
+    candidates = _candidate_gvhmr_roots()
+    for candidate in candidates:
         if candidate.exists() and _looks_like_gvhmr_repo(candidate):
             return candidate
-    # Keep legacy default for downstream error messages.
-    return _repo_root() / "external" / "gvhmr"
+
+    # Fallback to any existing path if strict marker checks fail. Some environments
+    # mount the repo with a layout slightly different than expected.
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    for legacy in [
+        _repo_root() / "external" / "GVHMR",
+        _repo_root() / "external" / "humanoid-projects" / "GVHMR",
+        _repo_root() / "external" / "gvhmr",
+        _repo_root() / "external" / "humanoid-projects" / "gvhmr",
+    ]:
+        if legacy.exists() and _looks_like_gvhmr_repo(legacy):
+            return legacy
+    candidates = _candidate_gvhmr_roots()
+    if candidates:
+        return candidates[0]
+    return _repo_root() / "external" / "GVHMR"
 
 
 def _resolve_heavy_checkpoints_root() -> Path:
     env = os.environ.get("GVHMR_CHECKPOINTS_ROOT")
     if env:
-        return Path(env).expanduser().resolve()
-    return _repo_root() / "external" / "humanoid-projects" / "GVHMR" / "inputs" / "checkpoints"
+        override = Path(env).expanduser().resolve()
+        if override.exists():
+            if override.is_dir():
+                candidates = [
+                    override,
+                    override / "inputs" / "checkpoints",
+                    override / "GVHMR" / "inputs" / "checkpoints",
+                    override / "gvhmr" / "inputs" / "checkpoints",
+                    override / "humanoid-projects" / "GVHMR" / "inputs" / "checkpoints",
+                    override / "humanoid-projects" / "gvhmr" / "inputs" / "checkpoints",
+                ]
+                for candidate in candidates:
+                    if candidate.exists():
+                        return candidate
+    for base in (Path("/app"), Path("/app/app"), Path("/workspace"), Path("/opt/han-platform"), _repo_root()):
+        if not base.exists():
+            continue
+        for rel in [
+            Path("external") / "GVHMR" / "inputs" / "checkpoints",
+            Path("external") / "humanoid-projects" / "GVHMR" / "inputs" / "checkpoints",
+            Path("external") / "humanoid-projects" / "gvhmr" / "inputs" / "checkpoints",
+            Path("external") / "gvhmr" / "inputs" / "checkpoints",
+        ]:
+            candidate = (base / rel).resolve()
+            if candidate.exists():
+                return candidate
+    return _repo_root() / "external" / "GVHMR" / "inputs" / "checkpoints"
 
 
 def _resolve_isaac_sim_python_bat() -> Path | None:
@@ -1220,10 +1355,11 @@ def run_gvhmr(
 ) -> dict[str, Any]:
     gvhmr_root = _resolve_gvhmr_root()
     demo_script = gvhmr_root / "tools" / "demo" / "demo.py"
-    if (not gvhmr_root.exists()) or (not demo_script.exists()):
+    if (not gvhmr_root.exists()) or (not _looks_like_gvhmr_repo(gvhmr_root)):
         checked = "\n".join(f"- {p}" for p in _candidate_gvhmr_roots())
         raise FileNotFoundError(
-            "GVHMR repo not found. Clone into external/gvhmr or set GVHMR_ROOT.\n"
+            "GVHMR repo not found. Clone into external/gvhmr, external/GVHMR, "
+            "external/humanoid-projects/GVHMR or set GVHMR_ROOT.\n"
             f"Expected: {gvhmr_root}\n"
             "Checked:\n"
             f"{checked}"
