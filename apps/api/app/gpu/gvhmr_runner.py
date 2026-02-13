@@ -165,8 +165,7 @@ def _looks_like_gvhmr_repo(path: Path) -> bool:
     if any((path / marker).exists() for marker in markers):
         return True
 
-    # As a final fallback, accept any non-empty directory that looks like a repo mount.
-    return len(list(path.glob("*"))) > 0
+    return False
 
 
 def _resolve_gvhmr_root() -> Path:
@@ -175,12 +174,20 @@ def _resolve_gvhmr_root() -> Path:
         if candidate.exists() and _looks_like_gvhmr_repo(candidate):
             return candidate
 
-    # Fallback to any existing path if strict marker checks fail. Some environments
-    # mount the repo with a layout slightly different than expected.
+    # If no explicit repo matches, probe each existing candidate for nested checkout
+    # roots that match the standard `tools/demo/demo.py` layout.
     for candidate in candidates:
-        if candidate.exists():
-            return candidate
+        if not candidate.exists():
+            continue
+        try:
+            for demo in candidate.rglob("tools/demo/demo.py"):
+                parent = demo.parents[2]
+                if parent.exists() and _looks_like_gvhmr_repo(parent):
+                    return parent
+        except OSError:
+            continue
 
+    # Last resort for legacy/staging layouts used by some CI setups.
     for legacy in [
         _repo_root() / "external" / "GVHMR",
         _repo_root() / "external" / "humanoid-projects" / "GVHMR",
@@ -189,10 +196,13 @@ def _resolve_gvhmr_root() -> Path:
     ]:
         if legacy.exists() and _looks_like_gvhmr_repo(legacy):
             return legacy
-    candidates = _candidate_gvhmr_roots()
-    if candidates:
-        return candidates[0]
-    return _repo_root() / "external" / "GVHMR"
+
+    # Preserve explicit `GVHMR_ROOT` intent if provided but malformed; this keeps
+    # error messages actionable.
+    env = os.environ.get("GVHMR_ROOT")
+    if env:
+        return Path(env).expanduser().resolve()
+    return candidates[0] if candidates else (_repo_root() / "external" / "humanoid-projects" / "GVHMR")
 
 
 def _resolve_heavy_checkpoints_root() -> Path:

@@ -37,8 +37,7 @@ def _looks_like_gvhmr_repo(path: Path) -> bool:
     if any((path / marker).exists() for marker in markers):
         return True
 
-    # As a final fallback, accept any non-empty directory with a `tools` branch.
-    return len(list(path.glob("*"))) > 0 and (path / "tools").is_dir()
+    return False
 
 
 def _candidate_gvhmr_roots() -> list[Path]:
@@ -121,10 +120,18 @@ def _resolve_gvhmr_root() -> Path:
     for candidate in _candidate_gvhmr_roots():
         if candidate.exists() and _looks_like_gvhmr_repo(candidate):
             return candidate
-    # If a path exists but fails heuristic checks, still try it as a last resort.
+    # If candidate paths fail shallow checks, inspect existing dirs for nested GVHMR
+    # checkouts (e.g. `<root>/humanoid-projects/GVHMR`).
     for candidate in _candidate_gvhmr_roots():
-        if candidate.exists():
-            return candidate
+        if not candidate.exists():
+            continue
+        try:
+            for demo in candidate.rglob("tools/demo/demo.py"):
+                parent = demo.parents[2]
+                if parent.exists() and _looks_like_gvhmr_repo(parent):
+                    return parent
+        except OSError:
+            continue
     repo_root = Path(__file__).resolve().parents[4]
     for legacy in [
         repo_root / "external" / "GVHMR",
