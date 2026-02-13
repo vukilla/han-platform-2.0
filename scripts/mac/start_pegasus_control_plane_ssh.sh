@@ -59,7 +59,9 @@ HAN_CP_API_PORT="${HAN_CP_API_PORT:-18000}"
 HAN_CP_MINIO_ACCESS_KEY="${HAN_CP_MINIO_ACCESS_KEY:-minioadmin}"
 HAN_CP_MINIO_SECRET_KEY="${HAN_CP_MINIO_SECRET_KEY:-minioadmin}"
 HAN_CP_S3_BUCKET="${HAN_CP_S3_BUCKET:-humanoid-network-dev}"
-HAN_CP_S3_PUBLIC_ENDPOINT="${HAN_CP_S3_PUBLIC_ENDPOINT:-}"
+# Clients typically access the Pegasus control-plane via SSH port-forwarding.
+# Default to localhost so presigned URLs work without requiring cluster DNS on the client machine.
+HAN_CP_S3_PUBLIC_ENDPOINT="${HAN_CP_S3_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}"
 HAN_CP_STATE_ROOT="${HAN_CP_STATE_ROOT:-}"
 
 ssh_target="$PEGASUS_HOST"
