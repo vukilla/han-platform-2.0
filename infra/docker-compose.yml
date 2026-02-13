@@ -92,8 +92,6 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000
       NEXT_PUBLIC_PRIVY_APP_ID: cmkgtr0dy0421ky0cqdrlltjl
-    depends_on:
-      - api
     ports:
       - "3000:3000"
     volumes:
