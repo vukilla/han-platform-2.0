@@ -29,7 +29,18 @@ class Settings(BaseSettings):
     # Dedicated queue for pose estimation (GVHMR). Keeps interactive pose previews
     # responsive even if the main GPU queue is busy (or unstable) with training jobs.
     celery_pose_queue: str = "pose"
+    # Source-aware queue naming for Pegasus fallback support.
+    celery_pose_queue_pegasus: str = "pose_pegasus"
+    celery_pose_queue_windows: str = "pose_windows"
+    celery_gpu_queue_pegasus: str = "gpu_pegasus"
+    celery_gpu_queue_windows: str = "gpu_windows"
     celery_default_queue: str = "cpu"
+    # Preferred and fallback worker sources when both paths are available.
+    # `pegasus` is expected to be the primary worker source.
+    celery_pose_preferred_worker_source: str = "pegasus"
+    celery_pose_fallback_worker_source: str = "windows"
+    celery_gpu_preferred_worker_source: str = "pegasus"
+    celery_gpu_fallback_worker_source: str = "windows"
     celery_max_queue_cpu: int = 100
     celery_max_queue_gpu: int = 20
     celery_max_queue_pose: int = 50

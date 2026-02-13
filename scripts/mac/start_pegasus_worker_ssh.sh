@@ -18,6 +18,7 @@ set -euo pipefail
 # - HAN_WORKER_QUEUES (default: pose)
 # - HAN_WORKER_POOL (default: solo)
 # - HAN_WORKER_CONCURRENCY (default: 1)
+# - HAN_WORKER_SOURCE (default: pegasus)
 # - SLURM_PARTITION (default: RTXA6000)
 # - SLURM_TIME (default: 12:00:00)
 # - SLURM_GRES (default: gpu:1)
@@ -58,6 +59,7 @@ HAN_PYTHON_BIN="${HAN_PYTHON_BIN:-}"
 HAN_WORKER_QUEUES="${HAN_WORKER_QUEUES:-pose}"
 HAN_WORKER_POOL="${HAN_WORKER_POOL:-solo}"
 HAN_WORKER_CONCURRENCY="${HAN_WORKER_CONCURRENCY:-1}"
+HAN_WORKER_SOURCE="${HAN_WORKER_SOURCE:-pegasus}"
 
 SLURM_PARTITION="${SLURM_PARTITION:-RTXA6000}"
 SLURM_TIME="${SLURM_TIME:-12:00:00}"
@@ -172,6 +174,7 @@ else
 fi
 echo "Remote repo:  $PEGASUS_REPO"
 echo "Queues:       $HAN_WORKER_QUEUES"
+echo "Source:       $HAN_WORKER_SOURCE"
 echo "Control plane:$resolved_control_plane (mode=$CONTROL_PLANE_MODE)"
 if [[ -n "$HAN_PYTHON_BIN" ]]; then
   echo "Python bin:   $HAN_PYTHON_BIN"
@@ -188,7 +191,7 @@ echo "Log err:      $ERR_LOG"
 echo ""
 
 "${ssh_cmd[@]}" "$ssh_target" \
-  "bash -s -- $(printf '%q ' "$PEGASUS_REPO" "$PULL_REPO" "$INSTALL_REQS" "$PEGASUS_LAUNCH_MODE" "$SLURM_PARTITION" "$SLURM_TIME" "$SLURM_GRES" "$SLURM_CPUS_PER_TASK" "$SLURM_MEM" "$SLURM_NODELIST" "$SLURM_EXCLUDE" "$SLURM_REQUEUE" "$HAN_PYTHON_BIN" "$HAN_WORKER_QUEUES" "$HAN_WORKER_POOL" "$HAN_WORKER_CONCURRENCY" "$REDIS_URL" "$DATABASE_URL" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" "$S3_BUCKET" "$S3_REGION" "$S3_SECURE" "$GVHMR_NATIVE_RENDER" "$GVHMR_RENDER_DEVICE" "$GVHMR_RENDER_INCAM" "$GVHMR_RENDER_EXTRA_VIEWS" "$PID_FILE" "$JOB_ID_FILE" "$OUT_LOG" "$ERR_LOG")" <<'REMOTE'
+  "bash -s -- $(printf '%q ' "$PEGASUS_REPO" "$PULL_REPO" "$INSTALL_REQS" "$PEGASUS_LAUNCH_MODE" "$SLURM_PARTITION" "$SLURM_TIME" "$SLURM_GRES" "$SLURM_CPUS_PER_TASK" "$SLURM_MEM" "$SLURM_NODELIST" "$SLURM_EXCLUDE" "$SLURM_REQUEUE" "$HAN_PYTHON_BIN" "$HAN_WORKER_QUEUES" "$HAN_WORKER_SOURCE" "$HAN_WORKER_POOL" "$HAN_WORKER_CONCURRENCY" "$REDIS_URL" "$DATABASE_URL" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" "$S3_BUCKET" "$S3_REGION" "$S3_SECURE" "$GVHMR_NATIVE_RENDER" "$GVHMR_RENDER_DEVICE" "$GVHMR_RENDER_INCAM" "$GVHMR_RENDER_EXTRA_VIEWS" "$PID_FILE" "$JOB_ID_FILE" "$OUT_LOG" "$ERR_LOG")" <<'REMOTE'
 set -euo pipefail
 
 remote_repo="$1"
@@ -205,24 +208,25 @@ slurm_exclude="${11}"
 slurm_requeue="${12}"
 python_bin="${13}"
 worker_queues="${14}"
-worker_pool="${15}"
-worker_concurrency="${16}"
-redis_url="${17}"
-database_url="${18}"
-s3_endpoint="${19}"
-s3_access_key="${20}"
-s3_secret_key="${21}"
-s3_bucket="${22}"
-s3_region="${23}"
-s3_secure="${24}"
-gvhmr_native_render="${25}"
-gvhmr_render_device="${26}"
-gvhmr_render_incam="${27}"
-gvhmr_render_extra_views="${28}"
-pid_file="${29}"
-job_id_file="${30}"
-out_log="${31}"
-err_log="${32}"
+worker_source="${15}"
+worker_pool="${16}"
+worker_concurrency="${17}"
+redis_url="${18}"
+database_url="${19}"
+s3_endpoint="${20}"
+s3_access_key="${21}"
+s3_secret_key="${22}"
+s3_bucket="${23}"
+s3_region="${24}"
+s3_secure="${25}"
+gvhmr_native_render="${26}"
+gvhmr_render_device="${27}"
+gvhmr_render_incam="${28}"
+gvhmr_render_extra_views="${29}"
+pid_file="${30}"
+job_id_file="${31}"
+out_log="${32}"
+err_log="${33}"
 
 mkdir -p "$remote_repo/tmp"
 
@@ -258,6 +262,7 @@ export S3_REGION="$s3_region"
 export S3_SECURE="$s3_secure"
 export HAN_PYTHON_BIN="$python_bin"
 export HAN_WORKER_QUEUES="$worker_queues"
+export HAN_WORKER_SOURCE="$worker_source"
 export HAN_WORKER_POOL="$worker_pool"
 export HAN_WORKER_CONCURRENCY="$worker_concurrency"
 export INSTALL_REQS="$install_reqs"
@@ -293,6 +298,7 @@ export S3_REGION='$(sq "$s3_region")'
 export S3_SECURE='$(sq "$s3_secure")'
 export HAN_PYTHON_BIN='$(sq "$python_bin")'
 export HAN_WORKER_QUEUES='$(sq "$worker_queues")'
+export HAN_WORKER_SOURCE='$(sq "$worker_source")'
 export HAN_WORKER_POOL='$(sq "$worker_pool")'
 export HAN_WORKER_CONCURRENCY='$(sq "$worker_concurrency")'
 export INSTALL_REQS='$(sq "$install_reqs")'

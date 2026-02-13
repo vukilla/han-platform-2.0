@@ -88,6 +88,95 @@ def _normalize_gvhmr_fast_profile(params: dict[str, Any] | None) -> dict[str, An
     return normalized
 
 
+def _normalize_worker_source(source: str | None) -> str:
+    value = (source or "").strip().lower()
+    if value in {"pegasus", "windows", "legacy"}:
+        return value
+    return "legacy"
+
+
+def _heartbeat_source_roles() -> dict[str, set[str]]:
+    """Return `{source: {roles}}` from active worker heartbeats in Redis."""
+    out: dict[str, set[str]] = {
+        "pegasus": set(),
+        "windows": set(),
+        "legacy": set(),
+    }
+    try:
+        client = redis.Redis.from_url(settings.redis_url)
+        for key in client.scan_iter(match="han:worker_heartbeat:*", count=200):
+            key_str = key.decode("utf-8") if isinstance(key, (bytes, bytearray)) else str(key)
+            parts = key_str.split(":")
+            source = None
+            role = None
+            if len(parts) >= 4:
+                source = parts[2]
+                role = parts[3]
+
+            raw = client.get(key)
+            if raw:
+                try:
+                    payload = json.loads(raw)
+                    source = source or payload.get("source")
+                    role = role or payload.get("role")
+                except Exception:
+                    pass
+
+            source = _normalize_worker_source(source)
+            if role:
+                role = str(role).strip().lower()
+                out.setdefault(source, set()).add(role)
+    except Exception:
+        return out
+    return out
+
+
+def _source_for_role(role: str, preferred_source: str, fallback_source: str, heartbeat: dict[str, set[str]]) -> str:
+    preferred_source = _normalize_worker_source(preferred_source)
+    fallback_source = _normalize_worker_source(fallback_source)
+    if preferred_source != "legacy" and preferred_source in heartbeat and role in heartbeat[preferred_source]:
+        return preferred_source
+    if fallback_source != "legacy" and fallback_source in heartbeat and role in heartbeat[fallback_source]:
+        return fallback_source
+    if role in heartbeat.get(preferred_source, set()):
+        return preferred_source
+    if role in heartbeat.get(fallback_source, set()):
+        return fallback_source
+    return preferred_source
+
+
+def _queue_for_job(role: str, required_gpu: bool) -> tuple[str, int]:
+    if not required_gpu:
+        return settings.celery_cpu_queue, settings.celery_max_queue_cpu
+
+    normalized_role = (role or "").strip().lower()
+    heartbeat = _heartbeat_source_roles()
+    if normalized_role == "pose":
+        source = _source_for_role(
+            role="pose",
+            preferred_source=settings.celery_pose_preferred_worker_source,
+            fallback_source=settings.celery_pose_fallback_worker_source,
+            heartbeat=heartbeat,
+        )
+        if source == "pegasus":
+            return settings.celery_pose_queue_pegasus, settings.celery_max_queue_pose
+        if source == "windows":
+            return settings.celery_pose_queue_windows, settings.celery_max_queue_pose
+        return settings.celery_pose_queue, settings.celery_max_queue_pose
+
+    source = _source_for_role(
+        role="gpu",
+        preferred_source=settings.celery_gpu_preferred_worker_source,
+        fallback_source=settings.celery_gpu_fallback_worker_source,
+        heartbeat=heartbeat,
+    )
+    if source == "pegasus":
+        return settings.celery_gpu_queue_pegasus, settings.celery_max_queue_gpu
+    if source == "windows":
+        return settings.celery_gpu_queue_windows, settings.celery_max_queue_gpu
+    return settings.celery_gpu_queue, settings.celery_max_queue_gpu
+
+
 class AuthLoginRequest(BaseModel):
     email: str
     name: str | None = None
@@ -332,14 +421,8 @@ def run_xgen(
     pose_only = bool(normalized_params.get("only_pose", False))
     pose_estimator = str(normalized_params.get("pose_estimator") or "").strip().lower()
 
-    # Route interactive GVHMR pose previews to a dedicated queue so they don't get stuck
-    # behind (or crash on) long-running training jobs.
-    if requires_gpu and pose_only and pose_estimator == "gvhmr":
-        queue_name = settings.celery_pose_queue
-        max_depth = settings.celery_max_queue_pose
-    else:
-        queue_name = settings.celery_gpu_queue if requires_gpu else settings.celery_cpu_queue
-        max_depth = settings.celery_max_queue_gpu if requires_gpu else settings.celery_max_queue_cpu
+    role = "pose" if (requires_gpu and pose_only and pose_estimator == "gvhmr") else ("gpu" if requires_gpu else "cpu")
+    queue_name, max_depth = _queue_for_job(role=role, required_gpu=requires_gpu)
     if is_queue_full(queue_name, max_depth):
         raise HTTPException(status_code=429, detail=f"Queue {queue_name} is at capacity")
     run_xgen_job.apply_async(args=[str(job.id)], queue=queue_name)
@@ -395,12 +478,8 @@ def requeue_xgen_job(
     pose_only = bool(params.get("only_pose", False))
     pose_estimator = str(params.get("pose_estimator") or "").strip().lower()
 
-    if requires_gpu and pose_only and pose_estimator == "gvhmr":
-        queue_name = settings.celery_pose_queue
-        max_depth = settings.celery_max_queue_pose
-    else:
-        queue_name = settings.celery_gpu_queue if requires_gpu else settings.celery_cpu_queue
-        max_depth = settings.celery_max_queue_gpu if requires_gpu else settings.celery_max_queue_cpu
+    role = "pose" if (requires_gpu and pose_only and pose_estimator == "gvhmr") else ("gpu" if requires_gpu else "cpu")
+    queue_name, max_depth = _queue_for_job(role=role, required_gpu=requires_gpu)
 
     if is_queue_full(queue_name, max_depth):
         raise HTTPException(status_code=429, detail=f"Queue {queue_name} is at capacity")
@@ -475,8 +554,8 @@ def run_xmimic(
         payload.params_json,
         idempotency_key=payload.idempotency_key,
     )
-    queue_name = settings.celery_gpu_queue
-    if is_queue_full(queue_name, settings.celery_max_queue_gpu):
+    queue_name, max_depth = _queue_for_job(role="gpu", required_gpu=True)
+    if is_queue_full(queue_name, max_depth):
         raise HTTPException(status_code=429, detail=f"Queue {queue_name} is at capacity")
     run_xmimic_job.apply_async(args=[str(job.id)], queue=queue_name)
     return job
@@ -604,7 +683,11 @@ def health(db: Session = Depends(get_db)):
         pass
     checks["cpu_queue_depth"] = get_queue_depth(settings.celery_cpu_queue)
     checks["pose_queue_depth"] = get_queue_depth(settings.celery_pose_queue)
+    checks["pose_queue_depth_pegasus"] = get_queue_depth(settings.celery_pose_queue_pegasus)
+    checks["pose_queue_depth_windows"] = get_queue_depth(settings.celery_pose_queue_windows)
     checks["gpu_queue_depth"] = get_queue_depth(settings.celery_gpu_queue)
+    checks["gpu_queue_depth_pegasus"] = get_queue_depth(settings.celery_gpu_queue_pegasus)
+    checks["gpu_queue_depth_windows"] = get_queue_depth(settings.celery_gpu_queue_windows)
     checks["status"] = "ok" if all([checks["db"], checks["redis"], checks["s3"]]) else "degraded"
     return checks
 
@@ -687,6 +770,12 @@ def list_workers(timeout: float = 2.0, include_stats: bool = False) -> dict[str,
     heartbeat_workers: list[dict[str, Any]] = []
     heartbeat_has_gpu = False
     heartbeat_has_pose = False
+    heartbeat_has_pose_pegasus = False
+    heartbeat_has_pose_windows = False
+    heartbeat_has_pose_legacy = False
+    heartbeat_has_gpu_pegasus = False
+    heartbeat_has_gpu_windows = False
+    heartbeat_has_gpu_legacy = False
     try:
         client = redis.Redis.from_url(settings.redis_url)
         for key in client.scan_iter(match="han:worker_heartbeat:*", count=100):
@@ -699,13 +788,28 @@ def list_workers(timeout: float = 2.0, include_stats: bool = False) -> dict[str,
                 except Exception:
                     payload = {}
             parts = key_str.split(":")
-            role = payload.get("role") or (parts[2] if len(parts) > 2 else None)
-            worker_name = payload.get("worker_name") or (parts[3] if len(parts) > 3 else None) or key_str
-            heartbeat_workers.append({"worker_name": worker_name, "role": role})
-            if role == settings.celery_gpu_queue:
+            role = payload.get("role") or (parts[3] if len(parts) > 3 else None)
+            source = payload.get("source") or (parts[2] if len(parts) > 2 else None) or "legacy"
+            worker_name = payload.get("worker_name") or (parts[4] if len(parts) > 4 else None) or key_str
+            heartbeat_workers.append({"worker_name": worker_name, "role": role, "source": source})
+            source = str(source).lower()
+            role = str(role).lower() if role is not None else role
+            if role == "gpu":
                 heartbeat_has_gpu = True
-            if role == settings.celery_pose_queue:
+                if source == "pegasus":
+                    heartbeat_has_gpu_pegasus = True
+                elif source == "windows":
+                    heartbeat_has_gpu_windows = True
+                else:
+                    heartbeat_has_gpu_legacy = True
+            if role == "pose":
                 heartbeat_has_pose = True
+                if source == "pegasus":
+                    heartbeat_has_pose_pegasus = True
+                elif source == "windows":
+                    heartbeat_has_pose_windows = True
+                else:
+                    heartbeat_has_pose_legacy = True
     except Exception:
         heartbeat_workers = []
         heartbeat_has_gpu = False
@@ -737,6 +841,12 @@ def list_workers(timeout: float = 2.0, include_stats: bool = False) -> dict[str,
         "worker_names": worker_names,
         "has_gpu_queue": has_gpu_queue,
         "has_pose_queue": has_pose_queue,
+        "has_gpu_queue_pegasus": heartbeat_has_gpu_pegasus,
+        "has_gpu_queue_windows": heartbeat_has_gpu_windows,
+        "has_gpu_queue_legacy": heartbeat_has_gpu_legacy,
+        "has_pose_queue_pegasus": heartbeat_has_pose_pegasus,
+        "has_pose_queue_windows": heartbeat_has_pose_windows,
+        "has_pose_queue_legacy": heartbeat_has_pose_legacy,
         "ping": ping,
         "active_queues": queues,
         "stats": stats,

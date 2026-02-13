@@ -14,6 +14,44 @@ fi
 QUEUES="${HAN_WORKER_QUEUES:-pose}"
 POOL="${HAN_WORKER_POOL:-solo}"
 CONCURRENCY="${HAN_WORKER_CONCURRENCY:-1}"
+SOURCE="${HAN_WORKER_SOURCE:-}"
+
+normalize_queues() {
+  local queue_values="$1"
+  local source="$2"
+  local map_source="${source,,}"
+  if [[ -z "$queue_values" || "$map_source" != "pegasus" && "$map_source" != "windows" ]]; then
+    echo "$queue_values"
+    return
+  fi
+
+  local mapped=()
+  local raw_queue=()
+  IFS="," read -r -a raw_queue <<< "$queue_values"
+  for item in "${raw_queue[@]}"; do
+    item="$(echo "$item" | tr '[:upper:]' '[:lower:]' | sed 's/^\\s*//;s/\\s*$//')"
+    if [[ -z "$item" ]]; then
+      continue
+    fi
+
+    if [[ "$item" == "pose" ]]; then
+      mapped+=("pose_${map_source}")
+      continue
+    fi
+    if [[ "$item" == "gpu" ]]; then
+      mapped+=("gpu_${map_source}")
+      continue
+    fi
+    mapped+=("$item")
+  done
+  if [[ ${#mapped[@]} -eq 0 ]]; then
+    echo "$queue_values"
+    return
+  fi
+  printf "%s" "$(IFS=","; echo "${mapped[*]}")"
+}
+
+QUEUES="$(normalize_queues "$QUEUES" "$SOURCE")"
 
 if [[ -z "${HAN_WORKER_ROLE:-}" ]]; then
   role="cpu"
