@@ -385,6 +385,23 @@ def _optimize_preview_mp4_for_webkit(path: Path, *, fps: int = 30, gop_seconds: 
         # - faststart moov atom placement
         # which are the main requirements for smooth WebKit playback.
         encoder_variants: list[list[str]] = [
+            # Fastest path on NVIDIA GPUs (Windows worker, Pegasus GPU nodes) when ffmpeg is built with NVENC.
+            [
+                "-c:v",
+                "h264_nvenc",
+                "-preset",
+                "p4",
+                "-rc",
+                "constqp",
+                "-qp",
+                "23",
+                "-pix_fmt",
+                "yuv420p",
+                "-profile:v",
+                "main",
+                "-bf",
+                "0",
+            ],
             [
                 "-c:v",
                 "libx264",
@@ -1599,21 +1616,43 @@ def run_gvhmr(
         faststart = {
             "input_norm": _faststart_mp4(rendered_input_norm) if rendered_input_norm.exists() else False,
         }
-        for label, path in (
+        candidates = [
             ("incam", rendered_incam),
             ("global45", rendered_global),
             ("global_front", rendered_global_front),
             ("global_side", rendered_global_side),
             ("preview", preview_path),
-        ):
+        ]
+
+        # Avoid re-encoding the same MP4 twice (e.g. when `preview_path == rendered_global`).
+        opt_by_path: dict[str, bool] = {}
+        faststart_by_path: dict[str, bool] = {}
+        for _label, path in candidates:
+            if not path.exists():
+                continue
+            try:
+                key = str(path.resolve())
+            except Exception:
+                key = str(path)
+            if key in opt_by_path:
+                continue
+            did_opt = _optimize_preview_mp4_for_webkit(path)
+            opt_by_path[key] = did_opt
+            # Fallback: even if re-encode fails, at least faststart remux for smoother buffering.
+            if not did_opt:
+                faststart_by_path[key] = _faststart_mp4(path)
+
+        for label, path in candidates:
             if not path.exists():
                 optimized[label] = False
                 continue
-            did_opt = _optimize_preview_mp4_for_webkit(path)
-            optimized[label] = did_opt
-            # Fallback: even if re-encode fails, at least faststart remux for smoother buffering.
-            if not did_opt:
-                faststart[label] = _faststart_mp4(path)
+            try:
+                key = str(path.resolve())
+            except Exception:
+                key = str(path)
+            optimized[label] = bool(opt_by_path.get(key, False))
+            if key in faststart_by_path:
+                faststart[label] = faststart_by_path[key]
 
     meta = {
         "ok": True,

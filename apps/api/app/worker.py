@@ -436,21 +436,48 @@ def _run_gvhmr_pose_estimation(demo_id: str, job_id: str, video_uri: str, params
             if w > 0 and h > 0 and cap.isOpened():
                 trimmed_video = tmp_root / "input_trimmed.mp4"
                 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-                writer = cv2.VideoWriter(str(trimmed_video), fourcc, fps, (w, h))
+                # Optional: reduce the effective FPS for interactive previews to speed up the full
+                # GVHMR pipeline (detection, feature extraction, render, encoding).
+                target_fps = params.get("gvhmr_target_fps", None)
+                if target_fps is None:
+                    target_fps = params.get("pose_target_fps", None)
+                try:
+                    target_fps_val = float(target_fps) if target_fps is not None else None
+                except Exception:
+                    target_fps_val = None
+                if target_fps_val is not None and target_fps_val <= 0:
+                    target_fps_val = None
+
+                fps_out = fps
+                stride = 1.0
+                if target_fps_val is not None and fps > 0 and target_fps_val < (fps - 1e-3):
+                    fps_out = float(target_fps_val)
+                    stride = float(fps) / float(fps_out)
+
+                writer = cv2.VideoWriter(str(trimmed_video), fourcc, float(fps_out), (w, h))
                 if writer.isOpened():
-                    max_frames = max(1, int(round(fps * float(max_seconds_val))))
+                    max_frames_in = max(1, int(round(fps * float(max_seconds_val))))
                     written = 0
-                    while written < max_frames:
+                    frames_in = 0
+                    next_write = 0.0
+                    while frames_in < max_frames_in:
                         ok_frame, frame = cap.read()
                         if not ok_frame:
                             break
-                        writer.write(frame)
-                        written += 1
+                        if frames_in + 1e-6 >= next_write:
+                            writer.write(frame)
+                            written += 1
+                            next_write += float(stride)
+                        frames_in += 1
                     writer.release()
                     if trimmed_video.exists() and trimmed_video.stat().st_size > 0 and written > 0:
                         local_video = trimmed_video
                         params["gvhmr_trimmed_seconds"] = float(max_seconds_val)
                         params["gvhmr_trimmed_frames"] = int(written)
+                        params["gvhmr_trimmed_fps_in"] = float(fps)
+                        params["gvhmr_trimmed_fps_out"] = float(fps_out)
+                        params["gvhmr_trimmed_frames_in"] = int(frames_in)
+                        params["gvhmr_trimmed_stride"] = float(stride)
             cap.release()
         except Exception:
             # Best-effort: if trimming fails, run GVHMR on the full video.

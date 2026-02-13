@@ -88,6 +88,11 @@ def _normalize_gvhmr_fast_profile(params: dict[str, Any] | None) -> dict[str, An
     # Low-latency defaults for previews.
     normalized.setdefault("gvhmr_static_cam", True)
     normalized.setdefault("gvhmr_skip_render", False)
+    # For interactive preview, reduce the amount of work per job by lowering the effective FPS.
+    # This trims compute and preview rendering costs roughly proportional to frame count.
+    #
+    # Override per-run by explicitly setting `gvhmr_target_fps` (set null/0 to keep source FPS).
+    normalized.setdefault("gvhmr_target_fps", 15)
     normalized.setdefault("gvhmr_max_seconds", 12)
     return normalized
 
