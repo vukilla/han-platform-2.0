@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import zipfile
 from datetime import datetime
 from time import sleep
@@ -874,6 +875,14 @@ def run_xgen_job(self, job_id: str):
         except Exception:
             pass
     except Exception as exc:
+        # Include a traceback in the job log. Otherwise we only persist `str(exc)` (for example "IndexError: 4"),
+        # which is not actionable when debugging remote workers.
+        try:
+            log_lines.append(f"{datetime.utcnow().isoformat()}Z traceback_begin")
+            log_lines.append(traceback.format_exc())
+            log_lines.append(f"{datetime.utcnow().isoformat()}Z traceback_end")
+        except Exception:
+            pass
         if job and self.request.retries < self.max_retries:
             _update_job_status(db, job, "RETRYING", error=str(exc))
             log_lines.append(f"{datetime.utcnow().isoformat()}Z status=RETRYING error={exc}")
@@ -1120,6 +1129,12 @@ def run_xmimic_job(self, job_id: str):
         except Exception:
             pass
     except Exception as exc:
+        try:
+            log_lines.append(f"{datetime.utcnow().isoformat()}Z traceback_begin")
+            log_lines.append(traceback.format_exc())
+            log_lines.append(f"{datetime.utcnow().isoformat()}Z traceback_end")
+        except Exception:
+            pass
         if job and self.request.retries < self.max_retries:
             _update_job_status(db, job, "RETRYING", error=str(exc))
             log_lines.append(f"{datetime.utcnow().isoformat()}Z status=RETRYING error={exc}")

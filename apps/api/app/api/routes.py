@@ -75,13 +75,17 @@ def _normalize_gvhmr_fast_profile(params: dict[str, Any] | None) -> dict[str, An
     if not params:
         return params
 
-    requires_gpu = bool(params.get("requires_gpu", False))
-    only_pose = bool(params.get("only_pose", False))
     pose_estimator = str(params.get("pose_estimator") or "").strip().lower()
-    if not (requires_gpu and only_pose and pose_estimator == "gvhmr"):
+    if pose_estimator != "gvhmr":
         return params
 
     normalized = dict(params)
+    # If the user picked GVHMR, default to the interactive "pose-only" flow.
+    # They can still override this by explicitly setting `only_pose=false`.
+    normalized.setdefault("requires_gpu", True)
+    normalized.setdefault("only_pose", True)
+
+    # Low-latency defaults for previews.
     normalized.setdefault("gvhmr_static_cam", True)
     normalized.setdefault("gvhmr_skip_render", True)
     normalized.setdefault("gvhmr_max_seconds", 12)
@@ -142,6 +146,8 @@ def _source_for_role(role: str, preferred_source: str, fallback_source: str, hea
         return preferred_source
     if role in heartbeat.get(fallback_source, set()):
         return fallback_source
+    if role in heartbeat.get("legacy", set()):
+        return "legacy"
     return preferred_source
 
 
@@ -151,7 +157,13 @@ def _queue_for_job(role: str, required_gpu: bool) -> tuple[str, int]:
 
     normalized_role = (role or "").strip().lower()
     heartbeat = _heartbeat_source_roles()
+    # Do not enqueue work to a queue that has no consumers. This is the main reason
+    # users see "Queued" forever across all stages.
+    has_any_pose = any("pose" in roles for roles in heartbeat.values())
+    has_any_gpu = any("gpu" in roles for roles in heartbeat.values())
     if normalized_role == "pose":
+        if not has_any_pose:
+            raise HTTPException(status_code=503, detail="No pose worker online (Pegasus, Windows, or legacy).")
         source = _source_for_role(
             role="pose",
             preferred_source=settings.celery_pose_preferred_worker_source,
@@ -164,6 +176,8 @@ def _queue_for_job(role: str, required_gpu: bool) -> tuple[str, int]:
             return settings.celery_pose_queue_windows, settings.celery_max_queue_pose
         return settings.celery_pose_queue, settings.celery_max_queue_pose
 
+    if not has_any_gpu:
+        raise HTTPException(status_code=503, detail="No GPU worker online (Pegasus or Windows).")
     source = _source_for_role(
         role="gpu",
         preferred_source=settings.celery_gpu_preferred_worker_source,
@@ -421,7 +435,9 @@ def run_xgen(
     pose_only = bool(normalized_params.get("only_pose", False))
     pose_estimator = str(normalized_params.get("pose_estimator") or "").strip().lower()
 
-    role = "pose" if (requires_gpu and pose_only and pose_estimator == "gvhmr") else ("gpu" if requires_gpu else "cpu")
+    # If GVHMR is selected, route to the pose worker path (it is the environment that has torch/cv2/etc).
+    # Full "gpu" jobs are reserved for longer-running training/sim workloads.
+    role = "pose" if (requires_gpu and pose_estimator == "gvhmr") else ("gpu" if requires_gpu else "cpu")
     queue_name, max_depth = _queue_for_job(role=role, required_gpu=requires_gpu)
     if is_queue_full(queue_name, max_depth):
         raise HTTPException(status_code=429, detail=f"Queue {queue_name} is at capacity")

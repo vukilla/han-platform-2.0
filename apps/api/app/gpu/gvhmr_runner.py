@@ -6,13 +6,50 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import traceback
 from typing import Any
 import shutil
 
 
 def _repo_root() -> Path:
-    # apps/api/app/gpu/<file>.py -> repo root is parents[4]
-    return Path(__file__).resolve().parents[4]
+    """Best-effort repo root resolver.
+
+    This file can run in multiple layouts:
+    - Dev checkout: `<repo>/apps/api/app/gpu/gvhmr_runner.py`
+    - Docker images: `/app/app/gpu/gvhmr_runner.py` (where the API `app/` folder is copied into `/app/app`)
+
+    Older code assumed a fixed directory depth and crashed with `IndexError` in Docker.
+    """
+    env = os.environ.get("HAN_REPO_ROOT") or os.environ.get("REPO_ROOT")
+    if env:
+        try:
+            return Path(env).expanduser().resolve()
+        except Exception:
+            pass
+
+    here = Path(__file__).resolve()
+    # Search upward for known root markers.
+    for p in [here.parent, *here.parents]:
+        if (p / ".git").exists():
+            return p
+        if (p / "apps").is_dir() and (p / "infra").is_dir():
+            return p
+        # Monorepo structure: `<repo>/apps/...`
+        if p.name == "apps" and (p / "api" / "app").is_dir():
+            return p.parent
+        if p.name == "app" and (p / "worker.py").exists():
+            # Docker images often use `/app/app/...` (repo root dir name == python package dir name).
+            if p.parent.name == "app":
+                return p.parent
+            # If the parent already looks like a project root, use it.
+            if (p.parent / "external").is_dir() or (p.parent / "apps").is_dir() or (p.parent / ".git").exists():
+                return p.parent
+        # Generic heuristic: if the directory has `external/`, treat it as the root.
+        if (p / "external").is_dir():
+            return p
+
+    # Fall back to filesystem root (avoids nonsensical relative paths under `.../gpu`).
+    return Path(here.anchor)
 
 
 def _candidate_gvhmr_roots() -> list[Path]:
@@ -473,6 +510,45 @@ def _render_gvhmr_global_preview(
             return x
         return torch.from_numpy(np.asarray(x))
 
+    def _clamp_frame_ids(frame_ids: np.ndarray, max_frame_index: int) -> np.ndarray:
+        if max_frame_index <= 0:
+            return np.array([0], dtype=np.int32)
+        if frame_ids.size == 0:
+            return np.array([0], dtype=np.int32)
+        max_idx = int(max_frame_index)
+        if max_idx == 0:
+            return np.zeros_like(frame_ids, dtype=np.int32)
+        clipped = np.clip(frame_ids, 0, max_idx)
+        return clipped.astype(np.int32)
+
+    def _frame_count_for_param(x: Any) -> int:
+        t = _as_tensor(x)
+        if t.ndim == 0:
+            return 1
+        if t.ndim == 1:
+            return 1
+        return int(t.shape[1]) if t.ndim >= 2 else 1
+
+    def _normalize_to_seq(t: torch.Tensor, *, target_frames: int) -> torch.Tensor:
+        if t.ndim == 0:
+            # scalar -> expand as constant per frame
+            return t.view(1, 1, 1).repeat(1, target_frames, 1)
+        if t.ndim == 1:
+            # per-param vector -> repeat for every frame
+            return t.view(1, 1, -1).repeat(1, target_frames, 1)
+        if t.ndim == 2:
+            # sequence -> make shape (1, F, ...)
+            t = t[None, ...]
+        if t.ndim == 3:
+            if t.shape[1] == target_frames:
+                return t
+            if t.shape[1] == 1:
+                return t.repeat(1, target_frames, 1)
+            if t.shape[1] > target_frames:
+                return t[:, :target_frames]
+            raise ValueError(f"cannot align frame count {t.shape[1]} to {target_frames}")
+        raise ValueError(f"Unsupported tensor rank for alignment: {t.ndim}")
+
     pred = torch.load(results_path, map_location="cpu")
     smpl_global = pred.get("smpl_params_global") or {}
     if not smpl_global:
@@ -518,14 +594,27 @@ def _render_gvhmr_global_preview(
 
         B = int(body_pose.shape[0])
         F = int(body_pose.shape[1])
+        # Body pose and camera orientation are expected as (B, F, ...).
         if transl is None:
             transl = torch.zeros((B, F, 3), dtype=torch.float32)
 
-        # Some outputs store betas per-frame; slice if needed.
-        if betas.ndim == 3 and betas.shape[1] >= int(frame_ids.max(initial=0) + 1):
-            betas_out = betas[:, frame_ids]
-        else:
-            betas_out = betas
+        target_frames = min(
+            _frame_count_for_param(body_pose),
+            _frame_count_for_param(global_orient),
+            _frame_count_for_param(transl),
+            _frame_count_for_param(betas),
+        )
+        if target_frames <= 0:
+            raise ValueError("smpl params contain no frames")
+
+        frame_ids = _clamp_frame_ids(frame_ids, target_frames - 1)
+        if target_frames <= 1:
+            frame_ids[:] = 0
+
+        body_pose = _normalize_to_seq(body_pose, target_frames=target_frames)
+        global_orient = _normalize_to_seq(global_orient, target_frames=target_frames)
+        transl = _normalize_to_seq(transl, target_frames=target_frames)
+        betas_out = _normalize_to_seq(betas, target_frames=target_frames)
 
         return (
             body_pose[:, frame_ids],
@@ -597,7 +686,11 @@ def _render_gvhmr_global_preview(
         thickness: int,
         radius: int,
     ) -> None:
+        if uv.ndim != 2 or uv.shape[0] == 0:
+            return
         for a, b in coco_edges:
+            if a >= uv.shape[0] or b >= uv.shape[0]:
+                continue
             ax, ay = int(uv[a, 0]), int(uv[a, 1])
             bx, by = int(uv[b, 0]), int(uv[b, 1])
             cv2.line(img, (ax, ay), (bx, by), color, thickness, lineType=cv2.LINE_AA)
@@ -894,32 +987,21 @@ def _render_gvhmr_incam_overlay(
     if w_in <= 0 or h_in <= 0:
         w_in, h_in = 640, 360
 
-    total_frames = int(min(int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0), int(K_fullimg.shape[0])))
-    if total_frames <= 0:
-        total_frames = int(K_fullimg.shape[0])
+    K_arr = _as_tensor(K_fullimg).float()
+    if K_arr.ndim != 3 or K_arr.shape[-1] != 3 or K_arr.shape[-2] != 3 or K_arr.shape[0] <= 0:
+        raise ValueError("smpl4d_results.pt has invalid K_fullimg shape")
 
-    max_preview_frames = 450
-    stride = max(1, int(math.ceil(total_frames / max_preview_frames)))
-    frame_ids = np.arange(0, total_frames, stride, dtype=np.int32)
-    fps_out = max(1.0, fps_in / float(stride))
-
-    # Compute mesh vertices in camera space.
-    gvhmr_root = _resolve_gvhmr_root()
-    if str(gvhmr_root) not in sys.path:
-        sys.path.insert(0, str(gvhmr_root))
-    from hmr4d.utils.body_model.smplx_lite import SmplxLite
-
-    def _as_tensor(x) -> torch.Tensor:
-        if torch.is_tensor(x):
-            return x
-        return torch.from_numpy(np.asarray(x))
+    cap_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    if cap_frames <= 0:
+        cap.release()
+        raise ValueError("Input preview video has no frames")
 
     body_pose = _as_tensor(smpl_incam.get("body_pose")).float()
     global_orient = _as_tensor(smpl_incam.get("global_orient")).float()
-    transl = smpl_incam.get("transl", None)
+    transl_raw = smpl_incam.get("transl", None)
     transl = (
-        _as_tensor(transl).float()
-        if transl is not None
+        _as_tensor(transl_raw).float()
+        if transl_raw is not None
         else torch.zeros((int(body_pose.shape[-2]), 3), dtype=torch.float32)
     )
     betas = _as_tensor(smpl_incam.get("betas")).float()
@@ -932,8 +1014,79 @@ def _render_gvhmr_incam_overlay(
         transl = transl[None, ...]
     if betas.ndim == 1:
         betas = betas[None, ...]
-    elif betas.ndim == 2:
+
+    def _frame_count_for(x: torch.Tensor) -> int:
+        if x.ndim == 0:
+            return 1
+        if x.ndim == 1:
+            return 1
+        return int(x.shape[1])
+
+    def _align_for_render(x: torch.Tensor, target_frames: int) -> torch.Tensor:
+        if x.ndim == 0:
+            return x.view(1, 1, 1).repeat(1, target_frames, 1)
+        if x.ndim == 1:
+            return x.view(1, 1, -1).repeat(1, target_frames, 1)
+        if x.ndim == 2:
+            x = x[None, ...]
+        if x.ndim == 3:
+            if x.shape[1] == target_frames:
+                return x
+            if x.shape[1] == 1:
+                return x.repeat(1, target_frames, 1)
+            if x.shape[1] > target_frames:
+                return x[:, :target_frames]
+            raise ValueError(f"cannot align frame count {x.shape[1]} to {target_frames}")
+        raise ValueError(f"Unsupported tensor rank for incam render: {x.ndim}")
+
+    frame_count = min(
+        int(cap_frames),
+        int(K_arr.shape[0]),
+        _frame_count_for(body_pose),
+        _frame_count_for(global_orient),
+        _frame_count_for(transl),
+        _frame_count_for(betas),
+    )
+    if frame_count <= 0:
+        cap.release()
+        raise ValueError("smpl params have no valid frame dimension")
+
+    total_frames = frame_count
+    if total_frames <= 0:
+        total_frames = int(K_arr.shape[0])
+
+    max_preview_frames = 450
+    stride = max(1, int(math.ceil(total_frames / max_preview_frames)))
+    frame_ids = np.arange(0, total_frames, stride, dtype=np.int32)
+    fps_out = max(1.0, fps_in / float(stride))
+    if frame_ids.size <= 0:
+        cap.release()
+        raise ValueError("No preview frame ids generated")
+
+    # Compute mesh vertices in camera space.
+    gvhmr_root = _resolve_gvhmr_root()
+    if str(gvhmr_root) not in sys.path:
+        sys.path.insert(0, str(gvhmr_root))
+    from hmr4d.utils.body_model.smplx_lite import SmplxLite
+
+    if betas.ndim == 2:
         betas = betas[None, ...]
+
+    max_frame_index = frame_ids.max(initial=0)
+    frame_count_in_params = min(
+        _frame_count_for(body_pose),
+        _frame_count_for(global_orient),
+        _frame_count_for(transl),
+        _frame_count_for(betas),
+    )
+    frame_ids = np.clip(frame_ids, 0, max(0, frame_count_in_params - 1)).astype(np.int32)
+    if frame_count_in_params <= 1:
+        frame_ids[:] = 0
+
+    body_pose = _align_for_render(body_pose, target_frames=frame_count_in_params)
+    global_orient = _align_for_render(global_orient, target_frames=frame_count_in_params)
+    transl = _align_for_render(transl, target_frames=frame_count_in_params)
+    betas = _align_for_render(betas, target_frames=frame_count_in_params)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model_mesh = SmplxLite().to(device)
@@ -1386,6 +1539,7 @@ def main() -> None:
         result = {
             "ok": False,
             "error": f"{type(exc).__name__}: {exc}",
+            "traceback": traceback.format_exc(),
         }
         print(json.dumps(result))
         raise SystemExit(1)

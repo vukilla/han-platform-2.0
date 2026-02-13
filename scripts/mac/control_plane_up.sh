@@ -10,7 +10,7 @@ echo "Repo: $ROOT_DIR"
 echo ""
 
 echo "-- Starting Docker Compose --"
-docker compose -f "$COMPOSE_FILE" up -d --build
+docker compose -f "$COMPOSE_FILE" up -d --build --remove-orphans
 
 echo "-- Running migrations --"
 docker compose -f "$COMPOSE_FILE" exec -T api alembic upgrade head
